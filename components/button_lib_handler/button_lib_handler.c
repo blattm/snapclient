@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "button_gpio.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -89,7 +90,7 @@ static void sleep_button_click_cb(void *arg, void *data) {
            CONFIG_BUTTON_HANDLER_SLEEP_GPIO);
 
   // Configure ext1 wakeup - wake on LOW (button press pulls to GND)
-  esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_mask, ESP_EXT1_WAKEUP_ANY_LOW);
+  esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_mask, ESP_EXT1_WAKEUP_ALL_LOW);
 
   // Give some time for the log to be printed
   vTaskDelay(pdMS_TO_TICKS(100));
@@ -110,17 +111,22 @@ static esp_err_t create_button(int gpio_num, button_handle_t *button_handle,
   }
 
   button_config_t btn_cfg = {
-      .type = BUTTON_TYPE_GPIO,
-      .gpio_button_config =
-          {
-              .gpio_num = gpio_num,
-              .active_level = 0,  // Active low (button press pulls to GND)
-          },
+      .long_press_time = 1000,  // 1 second for long press
+      .short_press_time = 200,  // 200ms for short press
   };
 
-  *button_handle = iot_button_create(&btn_cfg);
-  if (*button_handle == NULL) {
-    ESP_LOGE(TAG, "Failed to create %s button on GPIO %d", name, gpio_num);
+  button_gpio_config_t btn_gpio_cfg = {
+      .gpio_num = gpio_num,
+      .active_level = 0,           // Active low (button press pulls to GND)
+      .enable_power_save = false,  // Disable power save for now
+      .disable_pull = false,       // Enable internal pull-up
+  };
+
+  esp_err_t ret =
+      iot_button_new_gpio_device(&btn_cfg, &btn_gpio_cfg, button_handle);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to create %s button on GPIO %d: %d", name, gpio_num,
+             ret);
     return ESP_FAIL;
   }
 
@@ -145,7 +151,7 @@ esp_err_t button_lib_handler_init(void) {
   ret = create_button(CONFIG_BUTTON_HANDLER_PLAY_GPIO, &play_button, "Play");
   if (ret == ESP_OK) {
     // Register single click callback
-    ret = iot_button_register_cb(play_button, BUTTON_SINGLE_CLICK,
+    ret = iot_button_register_cb(play_button, BUTTON_SINGLE_CLICK, NULL,
                                  play_button_single_click_cb, NULL);
     if (ret != ESP_OK) {
       ESP_LOGE(TAG, "Failed to register play button single click callback: %d",
@@ -154,7 +160,7 @@ esp_err_t button_lib_handler_init(void) {
       play_button = NULL;
     } else {
       // Register double click callback
-      ret = iot_button_register_cb(play_button, BUTTON_DOUBLE_CLICK,
+      ret = iot_button_register_cb(play_button, BUTTON_DOUBLE_CLICK, NULL,
                                    play_button_double_click_cb, NULL);
       if (ret != ESP_OK) {
         ESP_LOGE(TAG,
@@ -162,13 +168,13 @@ esp_err_t button_lib_handler_init(void) {
                  ret);
       }
 
-      // Register multiple click callback for triple click
-      button_event_config_t multi_click_cfg = {
-          .event = BUTTON_MULTIPLE_CLICK,
-          .event_data.multiple_clicks.clicks = 3,
-      };
-      ret = iot_button_register_event_cb(play_button, multi_click_cfg,
-                                         play_button_triple_click_cb, NULL);
+      // Register multiple click callback for triple click (3 clicks)
+      button_event_args_t triple_click_args = {.multiple_clicks = {
+                                                   .clicks = 3,
+                                               }};
+      ret = iot_button_register_cb(play_button, BUTTON_MULTIPLE_CLICK,
+                                   &triple_click_args,
+                                   play_button_triple_click_cb, NULL);
       if (ret != ESP_OK) {
         ESP_LOGE(TAG,
                  "Failed to register play button triple click callback: %d",
@@ -187,7 +193,7 @@ esp_err_t button_lib_handler_init(void) {
   ret = create_button(CONFIG_BUTTON_HANDLER_VOL_UP_GPIO, &vol_up_button,
                       "Volume Up");
   if (ret == ESP_OK) {
-    ret = iot_button_register_cb(vol_up_button, BUTTON_PRESS_DOWN,
+    ret = iot_button_register_cb(vol_up_button, BUTTON_PRESS_DOWN, NULL,
                                  vol_up_button_click_cb, NULL);
     if (ret != ESP_OK) {
       ESP_LOGE(TAG, "Failed to register volume up button callback: %d", ret);
@@ -205,7 +211,7 @@ esp_err_t button_lib_handler_init(void) {
   ret = create_button(CONFIG_BUTTON_HANDLER_VOL_DOWN_GPIO, &vol_down_button,
                       "Volume Down");
   if (ret == ESP_OK) {
-    ret = iot_button_register_cb(vol_down_button, BUTTON_PRESS_DOWN,
+    ret = iot_button_register_cb(vol_down_button, BUTTON_PRESS_DOWN, NULL,
                                  vol_down_button_click_cb, NULL);
     if (ret != ESP_OK) {
       ESP_LOGE(TAG, "Failed to register volume down button callback: %d", ret);
@@ -222,7 +228,7 @@ esp_err_t button_lib_handler_init(void) {
 #if CONFIG_BUTTON_HANDLER_SLEEP_GPIO >= 0
   ret = create_button(CONFIG_BUTTON_HANDLER_SLEEP_GPIO, &sleep_button, "Sleep");
   if (ret == ESP_OK) {
-    ret = iot_button_register_cb(sleep_button, BUTTON_SINGLE_CLICK,
+    ret = iot_button_register_cb(sleep_button, BUTTON_SINGLE_CLICK, NULL,
                                  sleep_button_click_cb, NULL);
     if (ret != ESP_OK) {
       ESP_LOGE(TAG, "Failed to register sleep button callback: %d", ret);
