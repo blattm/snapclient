@@ -1,0 +1,88 @@
+menu "Button Handler Configuration"
+
+    config BUTTON_HANDLER_ENABLE
+        bool "Enable Button Handler"
+        default n
+        help
+            Enable hardware button support using espressif/button component.
+            Provides configurable buttons for media control and deep sleep.
+
+    choice BUTTON_HANDLER_BOARD_PRESET
+        prompt "Board Preset"
+        default BUTTON_HANDLER_PRESET_CUSTOM
+        depends on BUTTON_HANDLER_ENABLE
+        help
+            Select a board preset with pre-configured GPIO defaults.
+            Selecting a preset will use the predefined GPIO pins for that board.
+            Choose Custom to manually configure GPIO pins.
+
+        config BUTTON_HANDLER_PRESET_LYRAT_V43
+            bool "ESP32-LyraT v4.3"
+            help
+                Use pre-configured GPIO pins for ESP32-LyraT v4.3 board:
+                - Play: GPIO 33
+                - Volume Up: GPIO 27
+                - Volume Down: GPIO 13
+                - Sleep: GPIO 32
+
+        config BUTTON_HANDLER_PRESET_AUDIO_KIT_V22
+            bool "ESP32-Audio-Kit v2.2"
+            help
+                Use pre-configured GPIO pins for ESP32-Audio-Kit v2.2 board:
+                - Play: GPIO 23
+                - Volume Up: GPIO 5
+                - Volume Down: GPIO 18
+                - Sleep: GPIO 13
+
+        config BUTTON_HANDLER_PRESET_CUSTOM
+            bool "Custom/Generic"
+            help
+                Manually define your own GPIO pins for custom hardware configuration.
+    endchoice
+
+    menu "Custom GPIO Configuration"
+        depends on BUTTON_HANDLER_ENABLE && BUTTON_HANDLER_PRESET_CUSTOM
+
+        config BUTTON_HANDLER_PLAY_GPIO
+            int "Play Button GPIO"
+            default -1
+            help
+                GPIO pin for the play button (multi-click detection):
+                - Single click: toggle play/pause
+                - Double click: next track
+                - Triple click: previous track
+                Set to -1 to disable this button.
+
+        config BUTTON_HANDLER_VOL_UP_GPIO
+            int "Volume Up Button GPIO"
+            default -1
+            help
+                GPIO pin for the volume up button.
+                Set to -1 to disable this button.
+
+        config BUTTON_HANDLER_VOL_DOWN_GPIO
+            int "Volume Down Button GPIO"
+            default -1
+            help
+                GPIO pin for the volume down button.
+                Set to -1 to disable this button.
+
+        config BUTTON_HANDLER_SLEEP_GPIO
+            int "Sleep Button GPIO"
+            default -1
+            help
+                GPIO pin for the sleep button (enter deep sleep with ext1 wakeup).
+                Set to -1 to disable this button.
+
+    endmenu
+
+    config BUTTON_HANDLER_VOLUME_STEP
+        int "Volume change step (%)"
+        default 5
+        range 1 50
+        depends on BUTTON_HANDLER_ENABLE
+        help
+            Volume increment/decrement step in percent when volume buttons are pressed.
+            Default is 5%.
+
+endmenu
