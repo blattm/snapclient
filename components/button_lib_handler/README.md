@@ -18,24 +18,31 @@ Hardware button support for ESP32 Snapclient using the official [espressif/butto
 
 All GPIO pins are fully configurable through `idf.py menuconfig`:
 
-Navigate to: **Component config → Button Handler Configuration**
+Navigate to: **Button Handler Configuration** (at the top level of menuconfig)
 
 ### Board Presets
 
 Choose from pre-configured board presets or define custom GPIO pins:
 
-- 🎛️ **ESP32-LyraT v4.3** - Default GPIO: Play=33, Vol Up=27, Vol Down=13, Sleep=32
-- 🎛️ **ESP32-Audio-Kit v2.2** - Default GPIO: Play=23, Vol Up=5, Vol Down=18, Sleep=13
+- 🎛️ **ESP32-LyraT v4.3** - Uses GPIO: Play=33, Vol Up=27, Vol Down=13, Sleep=32
+- 🎛️ **ESP32-Audio-Kit v2.2** - Uses GPIO: Play=23, Vol Up=5, Vol Down=18, Sleep=13
 - ⚙️ **Custom/Generic** - Manually define your own GPIO pins
 
-Even after selecting a preset, you can customize individual pins.
+**Note:** When a preset is selected, the custom GPIO configuration menu is hidden and the preset's GPIO values are used. To configure custom pins, select "Custom/Generic".
 
-### GPIO Pin Configuration
+### GPIO Pin Configuration (Custom preset only)
 
-- **Play Button GPIO**: Default varies by preset, set to -1 to disable
-- **Volume Up GPIO**: Default varies by preset, set to -1 to disable
-- **Volume Down GPIO**: Default varies by preset, set to -1 to disable
-- **Sleep Button GPIO**: Default varies by preset, set to -1 to disable
+When "Custom/Generic" preset is selected:
+
+- **Play Button GPIO**: Set GPIO number or -1 to disable
+- **Volume Up GPIO**: Set GPIO number or -1 to disable
+- **Volume Down GPIO**: Set GPIO number or -1 to disable
+- **Sleep Button GPIO**: Set GPIO number or -1 to disable
+
+### Volume Control Configuration
+
+- **Volume change step (%)**: Default 5%, range 1-50%
+  - Determines how much volume changes per button press
 
 ## Usage
 
@@ -86,13 +93,26 @@ On wake, the component detects the wakeup cause and logs it.
 
 ## Snapclient API Integration
 
-Button callbacks currently log actions. To enable actual functionality, wire up the snapclient API calls in `button_lib_handler.c`:
+### Volume Control (Implemented)
+
+Volume up/down buttons are fully functional:
+- Reads current volume from `audioDAC_data.volume`
+- Adjusts by configured step percentage (default 5%)
+- Clamps to 0-100% range
+- Applies via `audio_set_volume()`
+- Logs: "Volume up: 50% -> 55%"
+
+**Note:** Current implementation sets volume locally. For multi-client setups with sync through snapserver, the snapcast protocol would need to support client-initiated volume change requests.
+
+### Media Control (Not Yet Implemented)
+
+Play button callbacks currently log actions. To enable media control functionality:
 
 - `play_button_single_click_cb()` → Add play/pause toggle call
 - `play_button_double_click_cb()` → Add next track call
 - `play_button_triple_click_cb()` → Add previous track call
-- `vol_up_button_click_cb()` → Add volume up call
-- `vol_down_button_click_cb()` → Add volume down call
+
+See `VOLUME_INTEGRATION_PLAN.md` for integration architecture details.
 
 ## Dependencies
 

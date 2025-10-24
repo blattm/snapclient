@@ -52,10 +52,15 @@ components/button_lib_handler/
 ## Configuration Flow
 
 1. User runs `idf.py menuconfig`
-2. Navigates to "Component config → Button Handler Configuration"
+2. Navigates to "Button Handler Configuration" (at top level, not under Component config)
 3. Enables button handler
-4. Selects board preset or configures custom GPIOs
-5. Builds project with `idf.py build`
+4. Selects board preset:
+   - LyraT v4.3: Uses preset GPIO pins (33, 27, 13, 32)
+   - Audio-Kit v2.2: Uses preset GPIO pins (23, 5, 18, 13)
+   - Custom/Generic: Opens custom GPIO configuration menu
+5. If Custom selected, configures individual GPIO pins
+6. Configures volume step percentage (default 5%)
+7. Builds project with `idf.py build`
 
 ## Runtime Flow
 
@@ -123,21 +128,43 @@ User presses sleep button again
 
 ## Integration Points
 
-### Current State
-All button callbacks currently log to console with TODO markers.
+### Volume Control (Implemented)
 
-### Future Integration
-Replace TODO markers with actual snapclient API calls:
+Volume up/down buttons are fully integrated with snapclient:
 
 ```c
 // In button_lib_handler.c
 
+static void vol_up_button_click_cb(void *arg, void *data) {
+    int current_volume = audioDAC_data.volume;
+    int new_volume = current_volume + CONFIG_BUTTON_HANDLER_VOLUME_STEP;
+    if (new_volume > 100) new_volume = 100;
+    
+    ESP_LOGI(TAG, "Volume up: %d%% -> %d%%", current_volume, new_volume);
+    audio_set_volume(new_volume);
+}
+```
+
+**External Dependencies:**
+- `audioDAC_data` - Global structure containing current volume and mute state
+- `audio_set_volume(int)` - Function to apply volume changes
+
+**Architecture Note:**
+Current implementation sets volume locally via `audio_set_volume()`. In the snapcast client-server architecture, volume state is managed by the server. A complete implementation would require:
+1. Send volume change request to snapserver
+2. Server updates its state
+3. Server broadcasts SERVER_SETTINGS message to all clients
+4. Clients apply the new volume
+
+For single-client setups, the current local-only approach works well. Multi-client synchronization would require protocol extensions. See `VOLUME_INTEGRATION_PLAN.md` for details.
+
+### Media Control (Future Integration)
+
+Play button callbacks currently log actions. To implement:
+
+```c
 static void play_button_single_click_cb(void *arg, void *data) {
     snapclient_toggle_play_pause();  // Call snapclient API
-}
-
-static void vol_up_button_click_cb(void *arg, void *data) {
-    snapclient_volume_up();  // Call snapclient API
 }
 ```
 
