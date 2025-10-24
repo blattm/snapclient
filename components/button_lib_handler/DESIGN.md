@@ -106,16 +106,16 @@ User presses sleep button again
 ## Board Presets
 
 ### ESP32-LyraT v4.3
-- Play: GPIO 36
-- Volume Up: GPIO 39
-- Volume Down: GPIO 34
-- Sleep: GPIO 35
+- Play: GPIO 33
+- Volume Up: GPIO 27
+- Volume Down: GPIO 13
+- Sleep: GPIO 32
 
 ### ESP32-Audio-Kit v2.2
-- Play: GPIO 36
-- Volume Up: GPIO 39
-- Volume Down: GPIO 34
-- Sleep: GPIO 35
+- Play: GPIO 23
+- Volume Up: GPIO 5
+- Volume Down: GPIO 18
+- Sleep: GPIO 13
 
 ### Custom
 - All GPIOs user-configurable
@@ -155,11 +155,11 @@ Component can be tested standalone by:
 Expected log messages:
 ```
 I (xxx) BUTTON_HANDLER: Initializing button handler component
-I (xxx) BUTTON_HANDLER: Play button created on GPIO 36
+I (xxx) BUTTON_HANDLER: Play button created on GPIO 33
 I (xxx) BUTTON_HANDLER: Play button handlers registered (single/double/triple click)
-I (xxx) BUTTON_HANDLER: Volume up button created on GPIO 39
-I (xxx) BUTTON_HANDLER: Volume down button created on GPIO 34
-I (xxx) BUTTON_HANDLER: Sleep button created on GPIO 35
+I (xxx) BUTTON_HANDLER: Volume up button created on GPIO 27
+I (xxx) BUTTON_HANDLER: Volume down button created on GPIO 13
+I (xxx) BUTTON_HANDLER: Sleep button created on GPIO 32
 I (xxx) BUTTON_HANDLER: Button handler component initialized successfully
 ```
 

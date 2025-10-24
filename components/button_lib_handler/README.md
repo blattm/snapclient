@@ -24,8 +24,8 @@ Navigate to: **Component config → Button Handler Configuration**
 
 Choose from pre-configured board presets or define custom GPIO pins:
 
-- 🎛️ **ESP32-LyraT v4.3** - Default GPIO: 36, 39, 34, 35
-- 🎛️ **ESP32-Audio-Kit v2.2** - Default GPIO: 36, 39, 34, 35
+- 🎛️ **ESP32-LyraT v4.3** - Default GPIO: Play=33, Vol Up=27, Vol Down=13, Sleep=32
+- 🎛️ **ESP32-Audio-Kit v2.2** - Default GPIO: Play=23, Vol Up=5, Vol Down=18, Sleep=13
 - ⚙️ **Custom/Generic** - Manually define your own GPIO pins
 
 Even after selecting a preset, you can customize individual pins.

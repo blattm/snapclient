@@ -40,8 +40,8 @@ menu "Button Handler Configuration"
 
         config BUTTON_HANDLER_PLAY_GPIO
             int "Play Button GPIO"
-            default 36 if BUTTON_HANDLER_PRESET_LYRAT_V43
-            default 36 if BUTTON_HANDLER_PRESET_AUDIO_KIT_V22
+            default 33 if BUTTON_HANDLER_PRESET_LYRAT_V43
+            default 23 if BUTTON_HANDLER_PRESET_AUDIO_KIT_V22
             default -1
             help
                 GPIO pin for the play button (multi-click detection):
@@ -52,8 +52,8 @@ menu "Button Handler Configuration"
 
         config BUTTON_HANDLER_VOL_UP_GPIO
             int "Volume Up Button GPIO"
-            default 39 if BUTTON_HANDLER_PRESET_LYRAT_V43
-            default 39 if BUTTON_HANDLER_PRESET_AUDIO_KIT_V22
+            default 27 if BUTTON_HANDLER_PRESET_LYRAT_V43
+            default 5 if BUTTON_HANDLER_PRESET_AUDIO_KIT_V22
             default -1
             help
                 GPIO pin for the volume up button.
@@ -61,8 +61,8 @@ menu "Button Handler Configuration"
 
         config BUTTON_HANDLER_VOL_DOWN_GPIO
             int "Volume Down Button GPIO"
-            default 34 if BUTTON_HANDLER_PRESET_LYRAT_V43
-            default 34 if BUTTON_HANDLER_PRESET_AUDIO_KIT_V22
+            default 13 if BUTTON_HANDLER_PRESET_LYRAT_V43
+            default 18 if BUTTON_HANDLER_PRESET_AUDIO_KIT_V22
             default -1
             help
                 GPIO pin for the volume down button.
@@ -70,8 +70,8 @@ menu "Button Handler Configuration"
 
         config BUTTON_HANDLER_SLEEP_GPIO
             int "Sleep Button GPIO"
-            default 35 if BUTTON_HANDLER_PRESET_LYRAT_V43
-            default 35 if BUTTON_HANDLER_PRESET_AUDIO_KIT_V22
+            default 32 if BUTTON_HANDLER_PRESET_LYRAT_V43
+            default 13 if BUTTON_HANDLER_PRESET_AUDIO_KIT_V22
             default -1
             help
                 GPIO pin for the sleep button (enter deep sleep with ext1 wakeup).
