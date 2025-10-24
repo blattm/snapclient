@@ -62,6 +62,10 @@
 #include "snapcast.h"
 #include "ui_http_server.h"
 
+#if CONFIG_BUTTON_HANDLER_ENABLE
+#include "button_lib_handler.h"
+#endif
+
 static bool isCachedChunk = false;
 static uint32_t cachedBlocks = 0;
 
@@ -2647,6 +2651,16 @@ void app_main(void) {
 
 #if CONFIG_USE_DSP_PROCESSOR
   dsp_processor_init();
+#endif
+
+#if CONFIG_BUTTON_HANDLER_ENABLE
+  ESP_LOGI(TAG, "Initializing button handler");
+  esp_err_t btn_ret = button_lib_handler_init();
+  if (btn_ret == ESP_OK) {
+    ESP_LOGI(TAG, "Button handler initialized successfully");
+  } else {
+    ESP_LOGW(TAG, "Button handler initialization failed: %d", btn_ret);
+  }
 #endif
 
   xTaskCreatePinnedToCore(&ota_server_task, "ota", 14 * 256, NULL,
