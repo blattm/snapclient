@@ -135,25 +135,38 @@ esp_err_t button_lib_handler_init(void) {
     }
 
     esp_err_t ret;
+    int buttons_initialized = 0;
 
     // Initialize play button with multi-click detection
 #if CONFIG_BUTTON_HANDLER_PLAY_GPIO >= 0
     ret = create_button(CONFIG_BUTTON_HANDLER_PLAY_GPIO, &play_button, "Play");
     if (ret == ESP_OK) {
         // Register single click callback
-        iot_button_register_cb(play_button, BUTTON_SINGLE_CLICK, play_button_single_click_cb, NULL);
-        
-        // Register double click callback
-        iot_button_register_cb(play_button, BUTTON_DOUBLE_CLICK, play_button_double_click_cb, NULL);
-        
-        // Register multiple click callback for triple click
-        button_event_config_t multi_click_cfg = {
-            .event = BUTTON_MULTIPLE_CLICK,
-            .event_data.multiple_clicks.clicks = 3,
-        };
-        iot_button_register_event_cb(play_button, multi_click_cfg, play_button_triple_click_cb, NULL);
-        
-        ESP_LOGI(TAG, "Play button handlers registered (single/double/triple click)");
+        ret = iot_button_register_cb(play_button, BUTTON_SINGLE_CLICK, play_button_single_click_cb, NULL);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register play button single click callback: %d", ret);
+            iot_button_delete(play_button);
+            play_button = NULL;
+        } else {
+            // Register double click callback
+            ret = iot_button_register_cb(play_button, BUTTON_DOUBLE_CLICK, play_button_double_click_cb, NULL);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to register play button double click callback: %d", ret);
+            }
+            
+            // Register multiple click callback for triple click
+            button_event_config_t multi_click_cfg = {
+                .event = BUTTON_MULTIPLE_CLICK,
+                .event_data.multiple_clicks.clicks = 3,
+            };
+            ret = iot_button_register_event_cb(play_button, multi_click_cfg, play_button_triple_click_cb, NULL);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to register play button triple click callback: %d", ret);
+            }
+            
+            ESP_LOGI(TAG, "Play button handlers registered (single/double/triple click)");
+            buttons_initialized++;
+        }
     }
 #endif
 
@@ -161,8 +174,15 @@ esp_err_t button_lib_handler_init(void) {
 #if CONFIG_BUTTON_HANDLER_VOL_UP_GPIO >= 0
     ret = create_button(CONFIG_BUTTON_HANDLER_VOL_UP_GPIO, &vol_up_button, "Volume Up");
     if (ret == ESP_OK) {
-        iot_button_register_cb(vol_up_button, BUTTON_PRESS_DOWN, vol_up_button_click_cb, NULL);
-        ESP_LOGI(TAG, "Volume up button handler registered");
+        ret = iot_button_register_cb(vol_up_button, BUTTON_PRESS_DOWN, vol_up_button_click_cb, NULL);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register volume up button callback: %d", ret);
+            iot_button_delete(vol_up_button);
+            vol_up_button = NULL;
+        } else {
+            ESP_LOGI(TAG, "Volume up button handler registered");
+            buttons_initialized++;
+        }
     }
 #endif
 
@@ -170,8 +190,15 @@ esp_err_t button_lib_handler_init(void) {
 #if CONFIG_BUTTON_HANDLER_VOL_DOWN_GPIO >= 0
     ret = create_button(CONFIG_BUTTON_HANDLER_VOL_DOWN_GPIO, &vol_down_button, "Volume Down");
     if (ret == ESP_OK) {
-        iot_button_register_cb(vol_down_button, BUTTON_PRESS_DOWN, vol_down_button_click_cb, NULL);
-        ESP_LOGI(TAG, "Volume down button handler registered");
+        ret = iot_button_register_cb(vol_down_button, BUTTON_PRESS_DOWN, vol_down_button_click_cb, NULL);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register volume down button callback: %d", ret);
+            iot_button_delete(vol_down_button);
+            vol_down_button = NULL;
+        } else {
+            ESP_LOGI(TAG, "Volume down button handler registered");
+            buttons_initialized++;
+        }
     }
 #endif
 
@@ -179,13 +206,25 @@ esp_err_t button_lib_handler_init(void) {
 #if CONFIG_BUTTON_HANDLER_SLEEP_GPIO >= 0
     ret = create_button(CONFIG_BUTTON_HANDLER_SLEEP_GPIO, &sleep_button, "Sleep");
     if (ret == ESP_OK) {
-        iot_button_register_cb(sleep_button, BUTTON_SINGLE_CLICK, sleep_button_click_cb, NULL);
-        ESP_LOGI(TAG, "Sleep button handler registered");
+        ret = iot_button_register_cb(sleep_button, BUTTON_SINGLE_CLICK, sleep_button_click_cb, NULL);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register sleep button callback: %d", ret);
+            iot_button_delete(sleep_button);
+            sleep_button = NULL;
+        } else {
+            ESP_LOGI(TAG, "Sleep button handler registered");
+            buttons_initialized++;
+        }
     }
 #endif
 
-    ESP_LOGI(TAG, "Button handler component initialized successfully");
-    return ESP_OK;
+    if (buttons_initialized > 0) {
+        ESP_LOGI(TAG, "Button handler component initialized successfully (%d button(s) active)", buttons_initialized);
+        return ESP_OK;
+    } else {
+        ESP_LOGW(TAG, "No buttons were initialized successfully");
+        return ESP_ERR_INVALID_STATE;
+    }
 }
 
 esp_err_t button_lib_handler_deinit(void) {

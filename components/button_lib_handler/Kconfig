@@ -79,23 +79,4 @@ menu "Button Handler Configuration"
 
     endmenu
 
-    menu "Button Timing Configuration"
-        depends on BUTTON_HANDLER_ENABLE
-
-        config BUTTON_HANDLER_LONG_PRESS_MS
-            int "Long Press Time (ms)"
-            default 1000
-            range 500 5000
-            help
-                Time in milliseconds to trigger a long press event.
-
-        config BUTTON_HANDLER_SHORT_PRESS_MS
-            int "Short Press Time (ms)"
-            default 50
-            range 20 500
-            help
-                Minimum time in milliseconds to register a valid short press.
-
-    endmenu
-
 endmenu
