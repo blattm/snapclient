@@ -26,6 +26,16 @@ static const char *TAG = "BUTTON_HANDLER";
 
 #ifdef CONFIG_BUTTON_HANDLER_ENABLE
 
+// External references to snapclient audio control functions and data
+// These are defined in main.c
+typedef struct audioDACdata_s {
+  bool mute;
+  int volume;
+} audioDACdata_t;
+
+extern audioDACdata_t audioDAC_data;
+extern void audio_set_volume(int volume);
+
 // Button handles
 static button_handle_t play_button = NULL;
 static button_handle_t vol_up_button = NULL;
@@ -114,18 +124,42 @@ static void play_button_triple_click_cb(void *arg, void *data) {
  * @brief Volume up button click callback
  */
 static void vol_up_button_click_cb(void *arg, void *data) {
-  ESP_LOGI(TAG, "Volume up button pressed");
-  // TODO: Wire up snapclient API call to increase volume
-  // Example: snapclient_volume_up();
+  int current_volume = audioDAC_data.volume;
+  int new_volume = current_volume + CONFIG_BUTTON_HANDLER_VOLUME_STEP;
+  
+  // Clamp to maximum 100%
+  if (new_volume > 100) {
+    new_volume = 100;
+  }
+  
+  ESP_LOGI(TAG, "Volume up: %d%% -> %d%%", current_volume, new_volume);
+  
+  // Set the new volume
+  // Note: This sets volume locally. In a full implementation, this should
+  // send a request to the snapserver, which will then send a SERVER_SETTINGS
+  // message back to update all clients. For now, we set it locally.
+  audio_set_volume(new_volume);
 }
 
 /**
  * @brief Volume down button click callback
  */
 static void vol_down_button_click_cb(void *arg, void *data) {
-  ESP_LOGI(TAG, "Volume down button pressed");
-  // TODO: Wire up snapclient API call to decrease volume
-  // Example: snapclient_volume_down();
+  int current_volume = audioDAC_data.volume;
+  int new_volume = current_volume - CONFIG_BUTTON_HANDLER_VOLUME_STEP;
+  
+  // Clamp to minimum 0%
+  if (new_volume < 0) {
+    new_volume = 0;
+  }
+  
+  ESP_LOGI(TAG, "Volume down: %d%% -> %d%%", current_volume, new_volume);
+  
+  // Set the new volume
+  // Note: This sets volume locally. In a full implementation, this should
+  // send a request to the snapserver, which will then send a SERVER_SETTINGS
+  // message back to update all clients. For now, we set it locally.
+  audio_set_volume(new_volume);
 }
 
 /**
