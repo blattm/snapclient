@@ -52,10 +52,6 @@
 
 static const char* TAG = "SNAPCAST_CUSTOM_PARSER";
 
-void parser_reset_state(snapcast_custom_parser_t* parser) {
-  parser->state = BASE_MESSAGE_STATE;
-}
-
 parser_return_state_t parse_base_message(snapcast_custom_parser_t* parser,
                                          base_message_t* base_message_rx) {
   READ_UINT16_LE(parser, base_message_rx->type);
@@ -65,7 +61,6 @@ parser_return_state_t parse_base_message(snapcast_custom_parser_t* parser,
   READ_TIMESTAMP(parser, base_message_rx->received);
   READ_UINT32_LE(parser, base_message_rx->size);
 
-  parser->state = TYPED_MESSAGE_STATE;
   return PARSER_COMPLETE;
 }
 
@@ -174,7 +169,6 @@ parser_return_state_t parse_wire_chunk_message(snapcast_custom_parser_t* parser,
     }
   }
 
-  parser_reset_state(parser);
   if (received_codec_header == true) {
     return PARSER_COMPLETE;
   } else {
@@ -253,7 +247,6 @@ parser_return_state_t parse_codec_header_message(
 
   *received_codec_header = true;
 
-  parser_reset_state(parser);
   return PARSER_COMPLETE;
 }
 
@@ -288,11 +281,9 @@ parser_return_state_t parse_sever_settings_message(
     // ESP_LOGI(TAG, "got string: %s",
     // *serverSettingsString);
 
-    parser_reset_state(parser);
     return PARSER_COMPLETE;  // do callback
   } else {
     // TODO: how to handle?
-    parser_reset_state(parser);
     return PARSER_INCOMPLETE;  // ignore?
   }
 }
@@ -338,7 +329,6 @@ parser_return_state_t parse_time_message(snapcast_custom_parser_t* parser,
                                          base_message_t* base_message_rx,
                                          time_message_t* time_message_rx) {
   READ_TIMESTAMP(parser, time_message_rx->latency);
-  parser_reset_state(parser);
 
   if (base_message_rx->size < 8) { // TODO: how to handle this case? Do we NEED to check?
     ESP_LOGE(TAG,
@@ -361,6 +351,5 @@ parser_return_state_t parse_unknown_message(snapcast_custom_parser_t* parser,
 
   ESP_LOGI(TAG, "done unknown typed message %d", base_message_rx->type);
 
-  parser_reset_state(parser);
   return PARSER_COMPLETE;
 }

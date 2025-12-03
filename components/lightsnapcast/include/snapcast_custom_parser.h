@@ -5,9 +5,6 @@
 #include "player.h" // needed for coded_type_t
 
 
-#define BASE_MESSAGE_STATE 0
-#define TYPED_MESSAGE_STATE 1
-
 typedef struct decoderData_s {
   uint32_t type;  // should be SNAPCAST_MESSAGE_CODEC_HEADER
                   // or SNAPCAST_MESSAGE_WIRE_CHUNK
@@ -17,13 +14,11 @@ typedef struct decoderData_s {
   uint32_t bytes;
 } decoderData_t;
 
-
 typedef int (*get_byte_callback_t)(void* connection_data, char* buffer);
 
 typedef struct {
   get_byte_callback_t get_byte_function;
   void* get_byte_context;
-  uint32_t state;  // BASE_MESSAGE_STATE or TYPED_MESSAGE_STATE
 } snapcast_custom_parser_t;
 
 typedef enum {
@@ -32,8 +27,6 @@ typedef enum {
   PARSER_CRITICAL_ERROR,
   PARSER_CONNECTION_ERROR,
 } parser_return_state_t;
-
-void parser_reset_state(snapcast_custom_parser_t* parser);
 
 parser_return_state_t parse_base_message(snapcast_custom_parser_t* parser,
                                          base_message_t* base_message_rx);
