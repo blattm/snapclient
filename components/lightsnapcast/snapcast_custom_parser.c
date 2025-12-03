@@ -288,42 +288,6 @@ parser_return_state_t parse_sever_settings_message(
   }
 }
 
-//// Leftover from moved code, still needed?
-//                case SNAPCAST_MESSAGE_STREAM_TAGS: {
-//                  size_t tmpSize = base_message_rx.size -
-//                  parser.typedMsgCurrentPos;
-//
-//                  if (tmpSize < len) {
-//                    start += tmpSize;
-//                    // currentPos += tmpSize;
-//                    parser.typedMsgCurrentPos += tmpSize;
-//                    len -= tmpSize;
-//                  } else {
-//                    start += len;
-//                    // currentPos += len;
-//
-//                    parser.typedMsgCurrentPos += len;
-//                    len = 0;
-//                  }
-//
-//                  if (typedMsgCurrentPos >=
-//                  base_message_rx.size) {
-//                    // ESP_LOGI(TAG,
-//                    // "done stream tags with length %d %d
-//                    %d",
-//                    // base_message_rx.size, currentPos,
-//                    // tmpSize);
-//
-//                    parser.typedMsgCurrentPos = 0;
-//                    // currentPos = 0;
-//
-//                    parser.state = BASE_MESSAGE_STATE;
-//                    parser.internalState = 0;
-//                  }
-//
-//                  break;
-//                }
-
 
 parser_return_state_t parse_time_message(snapcast_custom_parser_t* parser,
                                          base_message_t* base_message_rx,
