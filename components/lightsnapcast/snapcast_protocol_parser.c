@@ -177,16 +177,17 @@ parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parse
 }
 
 parser_return_state_t parse_codec_header_message(
-    snapcast_protocol_parser_t* parser, uint32_t* typedMsgLen,
+    snapcast_protocol_parser_t* parser, uint32_t* codecPayloadLen,
     bool* received_codec_header, codec_type_t* codec, char** codecPayload) {
   *received_codec_header = false;
 
-  READ_UINT32_LE(parser, *typedMsgLen);
+  uint32_t codecStringLen = 0;
+  READ_UINT32_LE(parser, codecStringLen);
 
   char codecString[32]; // longest supported string has 4 + 1 chars
 
-  if (*typedMsgLen + 1 > sizeof(codecString)) {
-    ESP_LOGE(TAG, "Codec string way too long: %lu", *typedMsgLen);
+  if (codecStringLen + 1 > sizeof(codecString)) {
+    ESP_LOGE(TAG, "Codec string way too long: %lu", codecStringLen);
     ESP_LOGI(TAG,
              "Change encoder codec to "
              "opus, flac or pcm in "
@@ -194,10 +195,10 @@ parser_return_state_t parse_codec_header_message(
              "server");
     return PARSER_CRITICAL_ERROR;
   }
-  READ_DATA(parser, codecString, *typedMsgLen);
+  READ_DATA(parser, codecString, codecStringLen);
 
   // NULL terminate string
-  codecString[*typedMsgLen] = 0;
+  codecString[codecStringLen] = 0;
 
   // ESP_LOGI (TAG, "got codec string: %s", tmp);
 
@@ -221,14 +222,14 @@ parser_return_state_t parse_codec_header_message(
   }
 
   //
-  READ_UINT32_LE(parser, *typedMsgLen);
+  READ_UINT32_LE(parser, *codecPayloadLen);
 
   if (*codecPayload) {
     free(*codecPayload);
     *codecPayload = NULL;
   }
 
-  *codecPayload = malloc(*typedMsgLen);  // allocate memory
+  *codecPayload = malloc(*codecPayloadLen);  // allocate memory
                                          // for codec payload
   if (*codecPayload == NULL) {
     ESP_LOGE(TAG,
@@ -238,7 +239,7 @@ parser_return_state_t parse_codec_header_message(
     return PARSER_CRITICAL_ERROR;
   }
 
-  READ_DATA(parser, *codecPayload, *typedMsgLen);
+  READ_DATA(parser, *codecPayload, *codecPayloadLen);
 
   *received_codec_header = true;
 

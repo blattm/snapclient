@@ -604,7 +604,7 @@ int server_settings_msg_received(char *serverSettingsString, snapcastSetting_t* 
  */
 int codec_header_received(
   char **codecPayload,
-  uint32_t typedMsgLen,
+  uint32_t codecPayloadLen,
   codec_type_t codec,
   snapcastSetting_t* scSet,
   time_sync_data_t* time_sync_data
@@ -653,14 +653,14 @@ int codec_header_received(
 
    ESP_LOGI(TAG, "Initialized opus Decoder: %d", error);
  } else if (codec == FLAC) {
-   decoderChunk.bytes = typedMsgLen;
+   decoderChunk.bytes = codecPayloadLen;
    do {
      decoderChunk.inData =
          (uint8_t *)malloc(decoderChunk.bytes);
      vTaskDelay(pdMS_TO_TICKS(1));
    } while (decoderChunk.inData == NULL);
    memcpy(decoderChunk.inData, *codecPayload,
-          typedMsgLen);
+          codecPayloadLen);
    decoderChunk.outData = NULL;
    decoderChunk.type = SNAPCAST_MESSAGE_CODEC_HEADER;
 
@@ -1083,11 +1083,11 @@ int process_data(
     }
 
     case SNAPCAST_MESSAGE_CODEC_HEADER: {
-      uint32_t typedMsgLen = 0;
-      switch (parse_codec_header_message(parser, &typedMsgLen, received_codec_header,
+      uint32_t codecPayloadLen = 0;
+      switch (parse_codec_header_message(parser, &codecPayloadLen, received_codec_header,
                                          codec, codecPayload)) {
         case PARSER_COMPLETE: {
-          if (codec_header_received(codecPayload, typedMsgLen, *codec, scSet, time_sync_data) != 0) {
+          if (codec_header_received(codecPayload, codecPayloadLen, *codec, scSet, time_sync_data) != 0) {
             return -1;
           }
           break;
