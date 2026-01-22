@@ -50,7 +50,7 @@
   } while(0)
 
 
-static const char* TAG = "SNAPCAST_CUSTOM_PARSER";
+static const char* TAG = "SNAPCAST_PROTOCOL_PARSER";
 
 parser_return_state_t parse_base_message(snapcast_protocol_parser_t* parser,
                                          base_message_t* base_message_rx) {
