@@ -178,41 +178,39 @@ parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parse
 
 parser_return_state_t parse_codec_header_message(
     snapcast_protocol_parser_t* parser, uint32_t* typedMsgLen,
-    bool* received_codec_header, char** codecString, codec_type_t* codec,
-    char** codecPayload) {
+    bool* received_codec_header, codec_type_t* codec, char** codecPayload) {
   *received_codec_header = false;
 
   READ_UINT32_LE(parser, *typedMsgLen);
 
-  if (*codecString) {
-    free(*codecString);
-    *codecString = NULL;
-  }
+  char codecString[32]; // longest supported string has 4 + 1 chars
 
-  *codecString = malloc(*typedMsgLen + 1);  // allocate memory for
-                                            // codec string
-  if (*codecString == NULL) {
-    ESP_LOGE(TAG, "couldn't get memory for codec string");
+  if (*typedMsgLen + 1 > sizeof(codecString)) {
+    ESP_LOGE(TAG, "Codec string way too long: %lu", *typedMsgLen);
+    ESP_LOGI(TAG,
+             "Change encoder codec to "
+             "opus, flac or pcm in "
+             "/etc/snapserver.conf on "
+             "server");
     return PARSER_CRITICAL_ERROR;
   }
-
-  READ_DATA(parser, *codecString, *typedMsgLen);
+  READ_DATA(parser, codecString, *typedMsgLen);
 
   // NULL terminate string
-  (*codecString)[*typedMsgLen] = 0;
+  codecString[*typedMsgLen] = 0;
 
   // ESP_LOGI (TAG, "got codec string: %s", tmp);
 
-  if (strcmp(*codecString, "opus") == 0) {
+  if (strcmp(codecString, "opus") == 0) {
     *codec = OPUS;
-  } else if (strcmp(*codecString, "flac") == 0) {
+  } else if (strcmp(codecString, "flac") == 0) {
     *codec = FLAC;
-  } else if (strcmp(*codecString, "pcm") == 0) {
+  } else if (strcmp(codecString, "pcm") == 0) {
     *codec = PCM;
   } else {
     *codec = NONE;
 
-    ESP_LOGI(TAG, "Codec : %s not supported", *codecString);
+    ESP_LOGI(TAG, "Codec : %s not supported", codecString);
     ESP_LOGI(TAG,
              "Change encoder codec to "
              "opus, flac or pcm in "
@@ -221,9 +219,6 @@ parser_return_state_t parse_codec_header_message(
 
     return PARSER_CRITICAL_ERROR;
   }
-
-  free(*codecString);
-  *codecString = NULL;
 
   //
   READ_UINT32_LE(parser, *typedMsgLen);

@@ -1044,7 +1044,6 @@ int process_data(
     snapcastSetting_t* scSet,
     pcm_chunk_message_t** pcmData,
     char** serverSettingsString,
-    char** codecString,
     char** codecPayload
 ){
   base_message_t base_message_rx;
@@ -1086,7 +1085,7 @@ int process_data(
     case SNAPCAST_MESSAGE_CODEC_HEADER: {
       uint32_t typedMsgLen = 0;
       switch (parse_codec_header_message(parser, &typedMsgLen, received_codec_header,
-                                         codecString, codec, codecPayload)) {
+                                         codec, codecPayload)) {
         case PARSER_COMPLETE: {
           if (codec_header_received(codecPayload, typedMsgLen, *codec, scSet, time_sync_data) != 0) {
             return -1;
@@ -1167,7 +1166,6 @@ static void http_get_task(void *pvParameters) {
   snapcastSetting_t scSet;
   pcm_chunk_message_t *pcmData = NULL;
   time_sync_data.timeout = FAST_SYNC_LATENCY_BUF;
-  char *codecString = NULL;
   char *codecPayload = NULL;
   char *serverSettingsString = NULL;
 
@@ -1217,11 +1215,6 @@ static void http_get_task(void *pvParameters) {
       if (decoderChunk.outData) {
         free(decoderChunk.outData);
         decoderChunk.outData = NULL;
-      }
-
-      if (codecString) {
-        free(codecString);
-        codecString = NULL;
       }
 
       if (codecPayload) {
@@ -1355,7 +1348,7 @@ static void http_get_task(void *pvParameters) {
     // Main connection loop - state machine + data processing
     while (1) {
       int result = process_data(&parser, &time_sync_data, &received_codec_header, &codec, &scSet,
-                                &pcmData, &serverSettingsString, &codecString, &codecPayload);
+                                &pcmData, &serverSettingsString, &codecPayload);
       if (result == -1) { 
         return;  // critical error in data processing
       } else if (result == -2) {
