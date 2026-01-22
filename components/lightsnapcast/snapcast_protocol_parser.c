@@ -1,4 +1,4 @@
-#include "snapcast_custom_parser.h"
+#include "snapcast_protocol_parser.h"
 
 #include "esp_log.h"
 
@@ -52,7 +52,7 @@
 
 static const char* TAG = "SNAPCAST_CUSTOM_PARSER";
 
-parser_return_state_t parse_base_message(snapcast_custom_parser_t* parser,
+parser_return_state_t parse_base_message(snapcast_protocol_parser_t* parser,
                                          base_message_t* base_message_rx) {
   READ_UINT16_LE(parser, base_message_rx->type);
   READ_UINT16_LE(parser, base_message_rx->id);
@@ -66,7 +66,7 @@ parser_return_state_t parse_base_message(snapcast_custom_parser_t* parser,
 
 
 
-parser_return_state_t parse_wire_chunk_message(snapcast_custom_parser_t* parser,
+parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parser,
                                                base_message_t* base_message_rx,
                                                bool received_codec_header,
                                                codec_type_t codec,
@@ -177,7 +177,7 @@ parser_return_state_t parse_wire_chunk_message(snapcast_custom_parser_t* parser,
 }
 
 parser_return_state_t parse_codec_header_message(
-    snapcast_custom_parser_t* parser, uint32_t* typedMsgLen,
+    snapcast_protocol_parser_t* parser, uint32_t* typedMsgLen,
     bool* received_codec_header, char** codecString, codec_type_t* codec,
     char** codecPayload) {
   *received_codec_header = false;
@@ -251,7 +251,7 @@ parser_return_state_t parse_codec_header_message(
 }
 
 parser_return_state_t parse_sever_settings_message(
-    snapcast_custom_parser_t* parser, base_message_t* base_message_rx,
+    snapcast_protocol_parser_t* parser, base_message_t* base_message_rx,
     char** serverSettingsString) {
   uint32_t typedMsgLen;
   READ_UINT32_LE(parser, typedMsgLen);
@@ -289,7 +289,7 @@ parser_return_state_t parse_sever_settings_message(
 }
 
 
-parser_return_state_t parse_time_message(snapcast_custom_parser_t* parser,
+parser_return_state_t parse_time_message(snapcast_protocol_parser_t* parser,
                                          base_message_t* base_message_rx,
                                          time_message_t* time_message_rx) {
   READ_TIMESTAMP(parser, time_message_rx->latency);
@@ -305,7 +305,7 @@ parser_return_state_t parse_time_message(snapcast_custom_parser_t* parser,
   return PARSER_COMPLETE;  // do callback
 }
 
-parser_return_state_t parse_unknown_message(snapcast_custom_parser_t* parser,
+parser_return_state_t parse_unknown_message(snapcast_protocol_parser_t* parser,
                                             base_message_t* base_message_rx) {
   // For unknown messages, we need to consume all remaining bytes
   char dummy_byte;

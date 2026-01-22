@@ -54,7 +54,7 @@
 #include "ota_server.h"
 #include "player.h"
 #include "snapcast.h"
-#include "snapcast_custom_parser.h"
+#include "snapcast_protocol_parser.h"
 #include "ui_http_server.h"
 #include "connection_handler.h"
 
@@ -1037,7 +1037,7 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
  * -2 if network needs restart
  */
 int process_data(
-    snapcast_custom_parser_t* parser,
+    snapcast_protocol_parser_t* parser,
     base_message_t* base_message_rx,
     time_sync_data_t* time_sync_data,
     time_message_t* time_message_rx,
@@ -1339,7 +1339,7 @@ static void http_get_task(void *pvParameters) {
     scSet.volume = 0;
     scSet.muted = true;
 
-    snapcast_custom_parser_t parser;
+    snapcast_protocol_parser_t parser;
 
     // state machine starts here     
 
