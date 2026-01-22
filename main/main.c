@@ -1043,7 +1043,6 @@ int process_data(
     codec_type_t* codec,
     snapcastSetting_t* scSet,
     pcm_chunk_message_t** pcmData,
-    decoderData_t* decoderChunk,
     char** serverSettingsString,
     char** codecString,
     char** codecPayload
@@ -1063,7 +1062,7 @@ int process_data(
       wire_chunk_message_t wire_chnk = {{0, 0}, 0, NULL}; // is wire_chnk.payload ever used?
       switch (parse_wire_chunk_message(parser, &base_message_rx,
                                        *received_codec_header, *codec,
-                                       pcmData, &wire_chnk, decoderChunk)) {
+                                       pcmData, &wire_chnk, &decoderChunk)) {
         case PARSER_COMPLETE: {
           if (handle_chunk_message(*codec, scSet, pcmData, &wire_chnk) != 0) {
             return -1;
@@ -1356,7 +1355,7 @@ static void http_get_task(void *pvParameters) {
     // Main connection loop - state machine + data processing
     while (1) {
       int result = process_data(&parser, &time_sync_data, &received_codec_header, &codec, &scSet,
-                                &pcmData, &decoderChunk, &serverSettingsString, &codecString, &codecPayload);
+                                &pcmData, &serverSettingsString, &codecString, &codecPayload);
       if (result == -1) { 
         return;  // critical error in data processing
       } else if (result == -2) {
