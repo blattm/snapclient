@@ -1038,9 +1038,7 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
  */
 int process_data(
     snapcast_protocol_parser_t* parser,
-    base_message_t* base_message_rx,
     time_sync_data_t* time_sync_data,
-    time_message_t* time_message_rx,
     bool* received_codec_header,
     codec_type_t* codec,
     snapcastSetting_t* scSet,
@@ -1051,18 +1049,19 @@ int process_data(
     char** codecString,
     char** codecPayload
 ){
+  base_message_t base_message_rx;
 
-  if (parse_base_message(parser, base_message_rx) == PARSER_COMPLETE) {
+  if (parse_base_message(parser, &base_message_rx) == PARSER_COMPLETE) {
     time_sync_data->now = esp_timer_get_time();
-    base_message_rx->received.sec = time_sync_data->now / 1000000;
-    base_message_rx->received.usec = time_sync_data->now - base_message_rx->received.sec * 1000000;
+    base_message_rx.received.sec = time_sync_data->now / 1000000;
+    base_message_rx.received.usec = time_sync_data->now - base_message_rx.received.sec * 1000000;
   } else {  // PARSER_CONNECTION_ERROR (only these two cases for base message)
     return -2;  // restart connection
   }
 
-  switch (base_message_rx->type) {
+  switch (base_message_rx.type) {
     case SNAPCAST_MESSAGE_WIRE_CHUNK: {
-      switch (parse_wire_chunk_message(parser, base_message_rx,
+      switch (parse_wire_chunk_message(parser, &base_message_rx,
                                        *received_codec_header, *codec,
                                        pcmData, wire_chnk, decoderChunk)) {
         case PARSER_COMPLETE: {
@@ -1111,7 +1110,7 @@ int process_data(
     }
 
     case SNAPCAST_MESSAGE_SERVER_SETTINGS: {
-      parser_return_state_t result = parse_sever_settings_message(parser, base_message_rx, serverSettingsString);
+      parser_return_state_t result = parse_sever_settings_message(parser, &base_message_rx, serverSettingsString);
       if (result == PARSER_COMPLETE) {
         if (server_settings_msg_received(*serverSettingsString, scSet) != 0){
           return -1;
@@ -1125,9 +1124,10 @@ int process_data(
     }
 
     case SNAPCAST_MESSAGE_TIME: {
-      parser_return_state_t result = parse_time_message(parser, base_message_rx, time_message_rx);
+      time_message_t time_message_rx;
+      parser_return_state_t result = parse_time_message(parser, &base_message_rx, &time_message_rx);
       if (result == PARSER_COMPLETE){
-        time_sync_msg_received(base_message_rx, time_message_rx, time_sync_data, *received_codec_header);
+        time_sync_msg_received(&base_message_rx, &time_message_rx, time_sync_data, *received_codec_header);
       } else if (result == PARSER_CONNECTION_ERROR) {
         return -2;
       } // could also be "incomplete", i.e. ignore content
@@ -1135,7 +1135,7 @@ int process_data(
     }
 
     default: {
-      if (parse_unknown_message(parser, base_message_rx) == PARSER_CONNECTION_ERROR){
+      if (parse_unknown_message(parser, &base_message_rx) == PARSER_CONNECTION_ERROR){
         return -2;
       }
       break;
@@ -1162,7 +1162,6 @@ static void http_get_task(void *pvParameters) {
   char *hello_message_serialized = NULL;
   int result;
   time_sync_data_t time_sync_data;
-  time_message_t time_message_rx = {{0, 0}};
   time_sync_data.lastTimeSync = 0;
   time_sync_data.timeSyncMessageTimer = NULL;
   bool received_codec_header = false;
@@ -1357,9 +1356,9 @@ static void http_get_task(void *pvParameters) {
 
     // Main connection loop - state machine + data processing
     while (1) {
-      int result = process_data(&parser, &base_message_rx, &time_sync_data, &time_message_rx, 
-                                &received_codec_header, &codec, &scSet, &pcmData, &wire_chnk,
-                                &decoderChunk, &serverSettingsString, &codecString, &codecPayload);
+      int result = process_data(&parser, &time_sync_data, &received_codec_header, &codec, &scSet,
+                                &pcmData, &wire_chnk, &decoderChunk, &serverSettingsString,
+                                &codecString, &codecPayload);
       if (result == -1) { 
         return;  // critical error in data processing
       } else if (result == -2) {
