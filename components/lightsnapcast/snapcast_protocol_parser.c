@@ -184,10 +184,12 @@ parser_return_state_t parse_codec_header_message(
   uint32_t codecStringLen = 0;
   READ_UINT32_LE(parser, codecStringLen);
 
-  char codecString[32]; // longest supported string has 4 + 1 chars
+  char codecString[8]; // longest supported string has 4 + 1 chars
 
   if (codecStringLen + 1 > sizeof(codecString)) {
-    ESP_LOGE(TAG, "Codec string way too long: %lu", codecStringLen);
+    READ_DATA(parser, codecString, sizeof(codecString)-1);
+    codecString[sizeof(codecString)-1] = 0; // null terminate
+    ESP_LOGE(TAG, "Codec : %s... not supported %lu", codecStringLen);
     ESP_LOGI(TAG,
              "Change encoder codec to "
              "opus, flac or pcm in "
