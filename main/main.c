@@ -589,7 +589,7 @@ int server_settings_msg_received(server_settings_message_t* server_settings_mess
  *
  */
 int codec_header_received(
-  char **codecPayload,
+  char *codecPayload,
   uint32_t codecPayloadLen,
   codec_type_t codec,
   snapcastSetting_t* scSet,
@@ -615,9 +615,9 @@ int codec_header_received(
    uint32_t rate;
    uint16_t bits;
 
-   memcpy(&rate, *codecPayload + 4, sizeof(rate));
-   memcpy(&bits, *codecPayload + 8, sizeof(bits));
-   memcpy(&channels, *codecPayload + 10,
+   memcpy(&rate, codecPayload + 4, sizeof(rate));
+   memcpy(&bits, codecPayload + 8, sizeof(bits));
+   memcpy(&channels, codecPayload + 10,
           sizeof(channels));
 
    scSet->codec = codec;
@@ -645,7 +645,7 @@ int codec_header_received(
          (uint8_t *)malloc(decoderChunk.bytes);
      vTaskDelay(pdMS_TO_TICKS(1));
    } while (decoderChunk.inData == NULL);
-   memcpy(decoderChunk.inData, *codecPayload,
+   memcpy(decoderChunk.inData, codecPayload,
           codecPayloadLen);
    decoderChunk.outData = NULL;
    decoderChunk.type = SNAPCAST_MESSAGE_CODEC_HEADER;
@@ -680,10 +680,10 @@ int codec_header_received(
    uint32_t rate;
    uint16_t bits;
 
-   memcpy(&channels, *codecPayload + 22,
+   memcpy(&channels, codecPayload + 22,
           sizeof(channels));
-   memcpy(&rate, *codecPayload + 24, sizeof(rate));
-   memcpy(&bits, *codecPayload + 34, sizeof(bits));
+   memcpy(&rate, codecPayload + 24, sizeof(rate));
+   memcpy(&bits, codecPayload + 34, sizeof(bits));
 
    scSet->codec = codec;
    scSet->bits = bits;
@@ -700,9 +700,6 @@ int codec_header_received(
 
    return -1;
  }
-
- free(*codecPayload);
- *codecPayload = NULL;
 
  if (player_send_snapcast_setting(scSet) != pdPASS) {
    ESP_LOGE(TAG,
@@ -1028,8 +1025,7 @@ int process_data(
     bool* received_codec_header,
     codec_type_t* codec,
     snapcastSetting_t* scSet,
-    pcm_chunk_message_t** pcmData,
-    char** codecPayload
+    pcm_chunk_message_t** pcmData
 ){
   base_message_t base_message_rx;
 
@@ -1068,20 +1064,24 @@ int process_data(
     }
 
     case SNAPCAST_MESSAGE_CODEC_HEADER: {
+      char* codecPayload = NULL;
       uint32_t codecPayloadLen = 0;
+      int return_value = 0;
       switch (parse_codec_header_message(parser,  received_codec_header, codec,
-                                         codecPayload, &codecPayloadLen)) {
+                                         &codecPayload, &codecPayloadLen)) {
         case PARSER_COMPLETE: {
           if (codec_header_received(codecPayload, codecPayloadLen, *codec, scSet, time_sync_data) != 0) {
-            return -1;
+            return_value = -1;
           }
           break;
         }
         case PARSER_CRITICAL_ERROR: {
-          return -1;
+          return_value = -1;
+          break;
         }
         case PARSER_CONNECTION_ERROR: {
-          return -2;
+          return_value = -2;
+          break;
         }
         case PARSER_INCOMPLETE: {
           // should not happen
@@ -1089,7 +1089,13 @@ int process_data(
           break;
         }
       }
-      break;
+      
+      // in all cases: free Payload
+      if (codecPayload != NULL){
+        free(codecPayload);
+      }
+
+      return return_value;
     }
 
     case SNAPCAST_MESSAGE_SERVER_SETTINGS: {
@@ -1163,7 +1169,6 @@ static void http_get_task(void *pvParameters) {
   snapcastSetting_t scSet;
   pcm_chunk_message_t *pcmData = NULL;
   time_sync_data.timeout = FAST_SYNC_LATENCY_BUF;
-  char *codecPayload = NULL;
 
   // create a timer to send time sync messages every x µs
   esp_timer_create(&tSyncArgs, &time_sync_data.timeSyncMessageTimer);
@@ -1211,11 +1216,6 @@ static void http_get_task(void *pvParameters) {
       if (decoderChunk.outData) {
         free(decoderChunk.outData);
         decoderChunk.outData = NULL;
-      }
-
-      if (codecPayload) {
-        free(codecPayload);
-        codecPayload = NULL;
       }
 
     }
@@ -1338,8 +1338,7 @@ static void http_get_task(void *pvParameters) {
 
     // Main connection loop - state machine + data processing
     while (1) {
-      int result = process_data(&parser, &time_sync_data, &received_codec_header, &codec, &scSet,
-                                &pcmData, &codecPayload);
+      int result = process_data(&parser, &time_sync_data, &received_codec_header, &codec, &scSet, &pcmData);
       if (result == -1) { 
         return;  // critical error in data processing
       } else if (result == -2) {

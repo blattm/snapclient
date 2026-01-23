@@ -236,13 +236,8 @@ parser_return_state_t parse_codec_header_message(
   //
   READ_UINT32_LE(parser, *codecPayloadLen);
 
-  if (*codecPayload) {
-    free(*codecPayload);
-    *codecPayload = NULL;
-  }
-
   *codecPayload = malloc(*codecPayloadLen);  // allocate memory
-                                         // for codec payload
+                                             // for codec payload
   if (*codecPayload == NULL) {
     ESP_LOGE(TAG,
              "couldn't get memory "
