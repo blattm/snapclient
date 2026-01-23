@@ -49,6 +49,15 @@
     } \
   } while(0)
 
+#define READ_DATA_WITH_CLEANUP(parser, dest, len, cleanup) \
+  do { \
+    for (uint32_t _i = 0; _i < (len); _i++) { \
+      if ((parser)->get_byte_function((parser)->get_byte_context, &(dest)[_i]) != 0) { \
+        cleanup; \
+        return PARSER_CONNECTION_ERROR; \
+      } \
+    } \
+  } while(0)
 
 static const char* TAG = "SNAPCAST_PROTOCOL_PARSER";
 
@@ -250,40 +259,51 @@ parser_return_state_t parse_codec_header_message(
 
 parser_return_state_t parse_sever_settings_message(
     snapcast_protocol_parser_t* parser, base_message_t* base_message_rx,
-    char** serverSettingsString) {
+    server_settings_message_t* server_settings_message) {
   uint32_t typedMsgLen;
+  char* serverSettingsString = NULL;
   READ_UINT32_LE(parser, typedMsgLen);
 
   // ESP_LOGI(TAG,"server settings string is %lu long", typedMsgLen);
 
   // now get some memory for server settings string
-  *serverSettingsString = malloc(typedMsgLen + 1);
-  if (*serverSettingsString == NULL) {
+  serverSettingsString = malloc(typedMsgLen + 1);
+  if (serverSettingsString == NULL) {
     ESP_LOGE(TAG,
              "couldn't get memory for "
              "server settings string");
-    // TODO: how to handle
+    return PARSER_CRITICAL_ERROR;
   }
 
   size_t tmpSize = base_message_rx->size - 4;
   // TODO: should there be an assert that tmpSize <= typedMsgLen?
 
-  if (*serverSettingsString) {
-    READ_DATA(parser, *serverSettingsString, tmpSize);
+  READ_DATA_WITH_CLEANUP(parser, serverSettingsString, tmpSize,
+    free(serverSettingsString) // This will be executed on error before returning
+  );
+
+  serverSettingsString[typedMsgLen] = 0;
+
+  // ESP_LOGI(TAG, "got string: %s",
+  // serverSettingsString);
+
+  int deserialization_result;
+
+  deserialization_result = server_settings_message_deserialize(
+      server_settings_message, serverSettingsString);
+
+  free(serverSettingsString);
+
+  if (deserialization_result) {
+    ESP_LOGE(TAG,
+             "Failed to read server "
+             "settings: %d",
+             deserialization_result);
+    return PARSER_CRITICAL_ERROR;
   }
 
-  if (*serverSettingsString) {
-    // NULL terminate string
-    (*serverSettingsString)[typedMsgLen] = 0;
+  return PARSER_COMPLETE;  // do callback
 
-    // ESP_LOGI(TAG, "got string: %s",
-    // *serverSettingsString);
-
-    return PARSER_COMPLETE;  // do callback
-  } else {
-    // TODO: how to handle?
-    return PARSER_INCOMPLETE;  // ignore?
-  }
 }
 
 

@@ -45,7 +45,7 @@ parser_return_state_t parse_codec_header_message(
 
 parser_return_state_t parse_sever_settings_message(
     snapcast_protocol_parser_t* parser, base_message_t* base_message_rx,
-    char** serverSettingsString);
+    server_settings_message_t* server_settings_message);
 
 parser_return_state_t parse_time_message(snapcast_protocol_parser_t* parser,
                                          base_message_t* base_message_rx,

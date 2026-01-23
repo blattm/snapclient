@@ -534,60 +534,46 @@ void audio_set_volume(int volume) {
 /**
  *
  */
-int server_settings_msg_received(char *serverSettingsString, snapcastSetting_t* scSet){
-  server_settings_message_t server_settings_message;
-  int result;
-
-  result = server_settings_message_deserialize(
-      &server_settings_message, serverSettingsString);
-  if (result) {
-    ESP_LOGE(TAG,
-             "Failed to read server "
-             "settings: %d",
-             result);
-    return 0; // NEW: ignore broken messages instead of continuing with possibly invalid data
-              // TODO: reset http connection instead
-  } else {
-    // log mute state, buffer, latency
-    ESP_LOGI(TAG, "Buffer length:  %ld",
-             server_settings_message.buffer_ms);
-    ESP_LOGI(TAG, "Latency:        %ld",
-             server_settings_message.latency);
-    ESP_LOGI(TAG, "Mute:           %d",
-             server_settings_message.muted);
-    ESP_LOGI(TAG, "Setting volume: %ld",
-             server_settings_message.volume);
-  }
+int server_settings_msg_received(server_settings_message_t* server_settings_message, snapcastSetting_t* scSet){
+  // log mute state, buffer, latency
+  ESP_LOGI(TAG, "Buffer length:  %ld",
+           server_settings_message->buffer_ms);
+  ESP_LOGI(TAG, "Latency:        %ld",
+           server_settings_message->latency);
+  ESP_LOGI(TAG, "Mute:           %d",
+           server_settings_message->muted);
+  ESP_LOGI(TAG, "Setting volume: %ld",
+           server_settings_message->volume);
 
   // Volume setting using ADF HAL
   // abstraction
-  if (scSet->muted != server_settings_message.muted) {
+  if (scSet->muted != server_settings_message->muted) {
 #if SNAPCAST_USE_SOFT_VOL
-    if (server_settings_message.muted) {
+    if (server_settings_message->muted) {
       dsp_processor_set_volome(0.0);
     } else {
       dsp_processor_set_volome(
-          (double)server_settings_message.volume / 100);
+          (double)server_settings_message->volume / 100);
     }
 #endif
-    audio_set_mute(server_settings_message.muted);
+    audio_set_mute(server_settings_message->muted);
   }
 
-  if (scSet->volume != server_settings_message.volume) {
+  if (scSet->volume != server_settings_message->volume) {
 #if SNAPCAST_USE_SOFT_VOL
-    if (!server_settings_message.muted) {
+    if (!server_settings_message->muted) {
       dsp_processor_set_volome(
-          (double)server_settings_message.volume / 100);
+          (double)server_settings_message->volume / 100);
     }
 #else
-    audio_set_volume(server_settings_message.volume);
+    audio_set_volume(server_settings_message->volume);
 #endif
   }
 
-  scSet->cDacLat_ms = server_settings_message.latency;
-  scSet->buf_ms = server_settings_message.buffer_ms;
-  scSet->muted = server_settings_message.muted;
-  scSet->volume = server_settings_message.volume;
+  scSet->cDacLat_ms = server_settings_message->latency;
+  scSet->buf_ms = server_settings_message->buffer_ms;
+  scSet->muted = server_settings_message->muted;
+  scSet->volume = server_settings_message->volume;
 
   if (player_send_snapcast_setting(scSet) != pdPASS) {
     ESP_LOGE(TAG,
@@ -1043,7 +1029,6 @@ int process_data(
     codec_type_t* codec,
     snapcastSetting_t* scSet,
     pcm_chunk_message_t** pcmData,
-    char** serverSettingsString,
     char** codecPayload
 ){
   base_message_t base_message_rx;
@@ -1108,16 +1093,28 @@ int process_data(
     }
 
     case SNAPCAST_MESSAGE_SERVER_SETTINGS: {
-      parser_return_state_t result = parse_sever_settings_message(parser, &base_message_rx, serverSettingsString);
-      if (result == PARSER_COMPLETE) {
-        if (server_settings_msg_received(*serverSettingsString, scSet) != 0){
+      server_settings_message_t server_settings_message;
+      parser_return_state_t result = parse_sever_settings_message(parser, &base_message_rx, &server_settings_message);
+      switch (result)
+      {
+        case PARSER_COMPLETE: {
+          if (server_settings_msg_received(&server_settings_message, scSet) != 0){
+            return -1;
+          }
+          break;
+        }
+        case PARSER_CRITICAL_ERROR: {
           return -1;
         }
-        free(*serverSettingsString);
-        *serverSettingsString = NULL;
-      } else if (result == PARSER_CONNECTION_ERROR) {
-        return -2;
-      } // could also be "incomplete", i.e. ignore content
+        case PARSER_CONNECTION_ERROR: {
+          return -2;
+        }
+        case PARSER_INCOMPLETE: {
+          // should not happen
+          // need more data
+          break;
+        }
+      }
       break;
     }
 
@@ -1167,7 +1164,6 @@ static void http_get_task(void *pvParameters) {
   pcm_chunk_message_t *pcmData = NULL;
   time_sync_data.timeout = FAST_SYNC_LATENCY_BUF;
   char *codecPayload = NULL;
-  char *serverSettingsString = NULL;
 
   // create a timer to send time sync messages every x µs
   esp_timer_create(&tSyncArgs, &time_sync_data.timeSyncMessageTimer);
@@ -1220,11 +1216,6 @@ static void http_get_task(void *pvParameters) {
       if (codecPayload) {
         free(codecPayload);
         codecPayload = NULL;
-      }
-
-      if (codecPayload) {
-        free(serverSettingsString);
-        serverSettingsString = NULL;
       }
 
     }
@@ -1348,7 +1339,7 @@ static void http_get_task(void *pvParameters) {
     // Main connection loop - state machine + data processing
     while (1) {
       int result = process_data(&parser, &time_sync_data, &received_codec_header, &codec, &scSet,
-                                &pcmData, &serverSettingsString, &codecPayload);
+                                &pcmData, &codecPayload);
       if (result == -1) { 
         return;  // critical error in data processing
       } else if (result == -2) {
