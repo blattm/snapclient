@@ -1069,8 +1069,8 @@ int process_data(
 
     case SNAPCAST_MESSAGE_CODEC_HEADER: {
       uint32_t codecPayloadLen = 0;
-      switch (parse_codec_header_message(parser, &codecPayloadLen, received_codec_header,
-                                         codec, codecPayload)) {
+      switch (parse_codec_header_message(parser,  received_codec_header, codec,
+                                         codecPayload, &codecPayloadLen)) {
         case PARSER_COMPLETE: {
           if (codec_header_received(codecPayload, codecPayloadLen, *codec, scSet, time_sync_data) != 0) {
             return -1;

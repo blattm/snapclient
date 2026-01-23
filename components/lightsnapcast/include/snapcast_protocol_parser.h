@@ -40,8 +40,9 @@ parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parse
                                                decoderData_t* decoderChunk);
 
 parser_return_state_t parse_codec_header_message(
-    snapcast_protocol_parser_t* parser, uint32_t* typedMsgLen,
-    bool* received_codec_header, codec_type_t* codec, char** codecPayload);
+    snapcast_protocol_parser_t* parser,
+    bool* received_codec_header, codec_type_t* codec,
+    char** codecPayload, uint32_t* codecPayloadLen);
 
 parser_return_state_t parse_sever_settings_message(
     snapcast_protocol_parser_t* parser, base_message_t* base_message_rx,
