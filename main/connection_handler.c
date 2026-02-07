@@ -15,8 +15,6 @@ static const char* TAG = "CONNECTION_HANDLER";
 
 void setup_network(esp_netif_t** netif) {
   int rc1, rc2 = ERR_OK;
-  mdns_result_t* r;
-  esp_err_t err = 0;
   uint16_t remotePort = 0;
 
   while (1) {
@@ -79,11 +77,11 @@ void setup_network(esp_netif_t** netif) {
       mdns_init();
 #endif
       // Find snapcast server via mDNS
-      r = NULL;
-      err = 0;
+      mdns_result_t* r = NULL;
+      esp_err_t err = 0;
       while (!r || err) {
         ESP_LOGI(TAG, "Lookup snapcast service on network");
-        esp_err_t err = mdns_query_ptr("_snapcast", "_tcp", 3000, 20, &r);
+        err = mdns_query_ptr("_snapcast", "_tcp", 3000, 20, &r);
         if (err) {
           ESP_LOGE(TAG, "Query Failed");
           vTaskDelay(pdMS_TO_TICKS(1000));
@@ -179,7 +177,6 @@ void setup_network(esp_netif_t** netif) {
       ESP_LOGV(TAG, "netconn using IPv6");
     } else {
       ESP_LOGW(TAG, "remote IP has unsupported IP type");
-
       continue;
     }
 
@@ -188,6 +185,8 @@ void setup_network(esp_netif_t** netif) {
 
       continue;
     }
+
+    //    netconn_set_flags(lwipNetconn, TF_NODELAY);
 
 #define USE_INTERFACE_BIND
 
@@ -209,6 +208,8 @@ void setup_network(esp_netif_t** netif) {
       ESP_LOGE(TAG, "can't bind local IP");
     }
 #endif
+    // tcp_nagle_disable(pcb)
+
     rc2 = netconn_connect(lwipNetconn, &remote_ip, remotePort);
     if (rc2 != ERR_OK) {
       ESP_LOGE(TAG, "can't connect to remote %s:%d, err %d",
@@ -233,6 +234,8 @@ void setup_network(esp_netif_t** netif) {
 }
 
 static int receive_data(struct netbuf** firstNetBuf, bool isMuted,
+                        void* before_receive_callback_data,
+                        void (*before_receive_callback)(void* data),
                         esp_netif_t* netif, bool* first_receive, int rc1) {
   // delete old netbuf. Restart connection if required
   if (*first_receive) {
@@ -249,14 +252,20 @@ static int receive_data(struct netbuf** firstNetBuf, bool isMuted,
   }
 
   while (1) {
+    before_receive_callback(before_receive_callback_data);
+
+    // start receive
     int rc2 = netconn_recv(lwipNetconn, firstNetBuf);
     if (rc2 != ERR_OK) {
-      ESP_LOGE(TAG, "netconn err %d", rc2);
       if (rc2 == ERR_CONN) {
         netconn_close(lwipNetconn);
-
+        ESP_LOGD(TAG, "netconn connection closed (%d)", rc2);
         // restart and try to reconnect
         return -1;
+      } else if (rc2 == ERR_TIMEOUT) {
+        ESP_LOGD(TAG, "netconn rx timeout (%d)", rc2);
+      } else {
+        ESP_LOGE(TAG, "netconn err %d", rc2);
       }
 
       if (*firstNetBuf != NULL) {
@@ -265,6 +274,8 @@ static int receive_data(struct netbuf** firstNetBuf, bool isMuted,
         *firstNetBuf = NULL;
       }
       continue;
+    } else {
+      ESP_LOGD(TAG, "netconn rx OK");
     }
     break;
   }
@@ -312,8 +323,8 @@ static int fill_buffer(bool* first_netbuf_processed, int* rc1,
 
     *rc1 = netbuf_data(firstNetBuf, (void**)start, len);
     if (*rc1 == ERR_OK) {
-      // ESP_LOGI (TAG, "netconn rx, data len: %d, %d",
-      // len, netbuf_len(firstNetBuf));
+      ESP_LOGD(TAG, "netconn rx, data len: %d, %d", len,
+               netbuf_len(firstNetBuf));
       return 0;
     } else {
       ESP_LOGE(TAG, "netconn rx, couldn't get data");
@@ -330,8 +341,9 @@ static int connection_ensure_byte(connection_t* connection) {
     switch (connection->state) {
       case CONNECTION_INITIALIZED: {
         if (receive_data(&connection->firstNetBuf, *connection->isMuted,
-                         connection->netif, &connection->first_receive,
-                         connection->rc1) != 0) {
+                         connection->before_receive_callback_data,
+                         connection->before_receive_callback, connection->netif,
+                         &connection->first_receive, connection->rc1) != 0) {
           connection->state = CONNECTION_RESTART_REQUIRED;
           break;  // restart connection
         }

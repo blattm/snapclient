@@ -27,6 +27,7 @@
 #include "lwip/netif.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
+#include "lwip/tcp.h"
 #include "mdns.h"
 #include "net_functions.h"
 #include "network_interface.h"
@@ -77,8 +78,8 @@ static FLAC__StreamDecoder *flacDecoder = NULL;
 
 const char *VERSION_STRING = "0.0.3";
 
-#define HTTP_TASK_PRIORITY 5
-#define HTTP_TASK_CORE_ID tskNO_AFFINITY
+#define HTTP_TASK_PRIORITY 17
+#define HTTP_TASK_CORE_ID 1
 
 #define OTA_TASK_PRIORITY 6
 #define OTA_TASK_CORE_ID tskNO_AFFINITY
@@ -115,11 +116,11 @@ void time_sync_msg_cb(void *args);
 
 static char base_message_serialized[BASE_MESSAGE_SIZE];
 
-static const esp_timer_create_args_t tSyncArgs = {
-    .callback = &time_sync_msg_cb,
-    .dispatch_method = ESP_TIMER_TASK,
-    .name = "tSyncMsg",
-    .skip_unhandled_events = false};
+//static const esp_timer_create_args_t tSyncArgs = {
+//    .callback = &time_sync_msg_cb,
+//    .dispatch_method = ESP_TIMER_TASK,
+//    .name = "tSyncMsg",
+//    .skip_unhandled_events = false};
 
 struct netconn *lwipNetconn;
 
@@ -151,16 +152,17 @@ void time_sync_msg_cb(void *args) {
   //  struct timeval now;
   int64_t now;
   int rc1;
+  uint8_t p_pkt[BASE_MESSAGE_SIZE + TIME_MESSAGE_SIZE];
 
-  uint8_t *p_pkt = (uint8_t *)malloc(BASE_MESSAGE_SIZE + TIME_MESSAGE_SIZE);
-  if (p_pkt == NULL) {
-    ESP_LOGW(
-        TAG,
-        "%s: Failed to get memory for time sync message. Skipping this round.",
-        __func__);
-
-    return;
-  }
+//  uint8_t *p_pkt = (uint8_t *)malloc(BASE_MESSAGE_SIZE + TIME_MESSAGE_SIZE);
+//  if (p_pkt == NULL) {
+//    ESP_LOGW(
+//        TAG,
+//        "%s: Failed to get memory for time sync message. Skipping this round.",
+//        __func__);
+//
+//    return;
+//  }
 
   memset(p_pkt, 0, BASE_MESSAGE_SIZE + TIME_MESSAGE_SIZE);
 
@@ -187,13 +189,14 @@ void time_sync_msg_cb(void *args) {
 
   rc1 = netconn_write(lwipNetconn, p_pkt, BASE_MESSAGE_SIZE + TIME_MESSAGE_SIZE,
                       NETCONN_NOCOPY);
+  
   if (rc1 != ERR_OK) {
     ESP_LOGW(TAG, "error writing timesync msg");
 
     return;
   }
 
-  free(p_pkt);
+//  free(p_pkt);
 
   // ESP_LOGI(TAG, "%s: sent time sync message, %u", __func__,
   // base_message_tx.id);
@@ -202,8 +205,8 @@ void time_sync_msg_cb(void *args) {
 typedef struct {
   int64_t now;
   int64_t lastTimeSync;
+  int64_t lastTimeSyncSent;
   uint64_t timeout;
-  esp_timer_handle_t timeSyncMessageTimer;
 } time_sync_data_t;
 
 /**
@@ -218,10 +221,10 @@ void time_sync_msg_received(base_message_t *base_message_rx,
         (int64_t)base_message_rx->received.usec;
   ttx = (int64_t)base_message_rx->sent.sec * 1000000LL +
         (int64_t)base_message_rx->sent.usec;
-  tdif = trx - ttx;
-  trx = (int64_t)time_message_rx->latency.sec * 1000000LL +
-        (int64_t)time_message_rx->latency.usec;
-  tmpDiffToServer = (trx - tdif) / 2;
+  tdif = trx - ttx;  //T4-T3
+  ttx = (int64_t)time_message_rx->latency.sec * 1000000LL +
+        (int64_t)time_message_rx->latency.usec; // T2-T1
+  tmpDiffToServer = (ttx - tdif) / 2; //((T2-T1) - (-T3+T4))/2
 
   // clear diffBuffer if last update is
   // older than a minute
@@ -236,16 +239,18 @@ void time_sync_msg_received(base_message_t *base_message_rx,
 
     time_sync_data->timeout = FAST_SYNC_LATENCY_BUF;
 
-    esp_timer_stop(time_sync_data->timeSyncMessageTimer);
-    if (received_codec_header == true) {
-      if (!esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
-        esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
-                                 time_sync_data->timeout);
-      }
-    }
+    netconn_set_recvtimeout(lwipNetconn, time_sync_data->timeout / 1000); // timeout in ms                          
+
+    // esp_timer_stop(time_sync_data->timeSyncMessageTimer);
+    // if (received_codec_header == true) {
+    //   if (!esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
+    //     esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
+    //                              time_sync_data->timeout);
+    //   }
+    // }
   }
 
-  player_latency_insert(tmpDiffToServer);
+  player_latency_insert(tmpDiffToServer, (tdif + ttx) / 2, trx);
 
   // ESP_LOGI(TAG, "Current latency:%lld:",
   // tmpDiffToServer);
@@ -254,37 +259,39 @@ void time_sync_msg_received(base_message_t *base_message_rx,
   time_sync_data->lastTimeSync = time_sync_data->now;
 
   if (received_codec_header == true) {
-    if (!esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
-      esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
-                               time_sync_data->timeout);
-    }
+    // if (!esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
+    //   esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
+    //                            time_sync_data->timeout);
+    // }
 
     bool is_full = false;
-    latency_buffer_full(&is_full, portMAX_DELAY);
+    latency_buffer_full(&is_full);
     if ((is_full == true) &&
         (time_sync_data->timeout < NORMAL_SYNC_LATENCY_BUF)) {
       time_sync_data->timeout = NORMAL_SYNC_LATENCY_BUF;
+      netconn_set_recvtimeout(lwipNetconn, time_sync_data->timeout / 1000); // timeout in ms
 
       ESP_LOGI(TAG, "latency buffer full");
 
-      if (esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
-        esp_timer_stop(time_sync_data->timeSyncMessageTimer);
-      }
+      // if (esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
+      //   esp_timer_stop(time_sync_data->timeSyncMessageTimer);
+      // }
 
-      esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
-                               time_sync_data->timeout);
+      // esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
+      //                          time_sync_data->timeout);
     } else if ((is_full == false) &&
                (time_sync_data->timeout > FAST_SYNC_LATENCY_BUF)) {
       time_sync_data->timeout = FAST_SYNC_LATENCY_BUF;
+      netconn_set_recvtimeout(lwipNetconn, time_sync_data->timeout / 1000); // timeout in ms
 
       ESP_LOGI(TAG, "latency buffer not full");
 
-      if (esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
-        esp_timer_stop(time_sync_data->timeSyncMessageTimer);
-      }
+      // if (esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
+      //   esp_timer_stop(time_sync_data->timeSyncMessageTimer);
+      // }
 
-      esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
-                               time_sync_data->timeout);
+      // esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
+      //                          time_sync_data->timeout);
     }
   }
 }
@@ -674,11 +681,11 @@ int codec_header_received(char *codecPayload, uint32_t codecPayloadLen,
 
   // ESP_LOGI(TAG, "done codec header msg");
 
-  esp_timer_stop(time_sync_data->timeSyncMessageTimer);
-  if (!esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
-    esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
-                             time_sync_data->timeout);
-  }
+  // esp_timer_stop(time_sync_data->timeSyncMessageTimer);
+  // if (!esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
+  //   esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
+  //                            time_sync_data->timeout);
+  // }
   return 0;
 }
 
@@ -818,8 +825,9 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
         wire_chnk->timestamp.usec = timestamp % 1000000ULL;
       }
 
-      pcm_chunk_message_t *new_pcmChunk;
+      pcm_chunk_message_t *new_pcmChunk = NULL;
       int32_t ret = allocate_pcm_chunk_memory(&new_pcmChunk, pcmChunk.bytes);
+//      int32_t ret = -1;
 
       scSet->chkInFrames = FLAC__stream_decoder_get_blocksize(flacDecoder);
 
@@ -841,7 +849,7 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
             // to be in the first fragment
             uint32_t tmpData;
             memcpy(&tmpData, &pcmChunk.outData[fragmentCnt],
-                   (scSet->ch * (scSet->bits / 8)));
+                   sizeof(uint32_t));
 
             if (fragment != NULL) {
               volatile uint32_t *test =
@@ -849,12 +857,12 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
               *test = (volatile uint32_t)tmpData;
             }
 
-            fragmentCnt += (scSet->ch * (scSet->bits / 8));
-            if (fragmentCnt >= fragment->size) {
-              fragmentCnt = 0;
+            fragmentCnt += sizeof(uint32_t);
+            // if (fragmentCnt >= fragment->size) {
+            //   fragmentCnt = 0;
 
-              fragment = fragment->nextFragment;
-            }
+            //   fragment = fragment->nextFragment;
+            // }
           }
         }
 
@@ -868,6 +876,11 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
 #endif
 
         insert_pcm_chunk(new_pcmChunk);
+//        free_pcm_chunk(new_pcmChunk);
+//        new_pcmChunk = NULL;
+      }
+      else {
+        ESP_LOGE(TAG, "failed to allocate chunk");
       }
 
       free(pcmChunk.outData);
@@ -1082,6 +1095,28 @@ int process_data(snapcast_protocol_parser_t *parser,
   return 0;
 }
 
+typedef struct
+{
+  time_sync_data_t *time_sync_data;
+  bool *received_codec_header;
+} before_receive_callback_data_t;
+
+
+void before_receive_callback(before_receive_callback_data_t *data) {
+  //unpack
+  time_sync_data_t *time_sync_data = data->time_sync_data;
+  bool received_codec_header = *data->received_codec_header;
+
+  time_sync_data->now = esp_timer_get_time();
+  // send time sync message
+  if ((received_codec_header && (time_sync_data->now - time_sync_data->lastTimeSyncSent) >= time_sync_data->timeout)) {
+    time_sync_msg_cb(NULL);
+    time_sync_data->lastTimeSyncSent = time_sync_data->now;
+    
+    // ESP_LOGI(TAG, "time sync sent after %lluus", timeout);
+  }
+}
+
 /**
  *
  */
@@ -1098,15 +1133,14 @@ static void http_get_task(void *pvParameters) {
   int result;
   time_sync_data_t time_sync_data;
   time_sync_data.lastTimeSync = 0;
-  time_sync_data.timeSyncMessageTimer = NULL;
+  time_sync_data.lastTimeSyncSent = 0;
   bool received_codec_header = false;
   codec_type_t codec = NONE;
   snapcastSetting_t scSet;
   pcm_chunk_message_t *pcmData = NULL;
-  time_sync_data.timeout = FAST_SYNC_LATENCY_BUF;
 
   // create a timer to send time sync messages every x µs
-  esp_timer_create(&tSyncArgs, &time_sync_data.timeSyncMessageTimer);
+//  esp_timer_create(&tSyncArgs, &time_sync_data.timeSyncMessageTimer);
 
   idCounterSemaphoreHandle = xSemaphoreCreateMutex();
   if (idCounterSemaphoreHandle == NULL) {
@@ -1118,10 +1152,9 @@ static void http_get_task(void *pvParameters) {
   while (1) {
     // do some house keeping
     {
-      esp_timer_stop(time_sync_data.timeSyncMessageTimer);
+//      esp_timer_stop(time_sync_data.timeSyncMessageTimer);
 
       received_codec_header = false;
-      time_sync_data.timeout = FAST_SYNC_LATENCY_BUF;
 
       xSemaphoreTake(idCounterSemaphoreHandle, portMAX_DELAY);
       id_counter = 0;
@@ -1152,11 +1185,11 @@ static void http_get_task(void *pvParameters) {
     // NETWORK setup ends here ( or before getting mac address )
     setup_network(&connection.netif);
 
-    if (reset_latency_buffer() < 0) {
-      ESP_LOGE(TAG,
-               "reset_diff_buffer: couldn't reset median filter long. STOP");
-      return;
-    }
+    //if (reset_latency_buffer() < 0) {
+    //  ESP_LOGE(TAG,
+    //           "reset_diff_buffer: couldn't reset median filter long. STOP");
+    //  return;
+    //}
 
     uint8_t base_mac[6];
 #if CONFIG_SNAPCLIENT_USE_INTERNAL_ETHERNET || \
@@ -1228,12 +1261,7 @@ static void http_get_task(void *pvParameters) {
 
     rc1 = netconn_write(lwipNetconn, base_message_serialized, BASE_MESSAGE_SIZE,
                         NETCONN_NOCOPY);
-    if (rc1 != ERR_OK) {
-      ESP_LOGE(TAG, "netconn failed to send base message");
-
-      continue;
-    }
-    rc1 = netconn_write(lwipNetconn, hello_message_serialized,
+    rc1 |= netconn_write(lwipNetconn, hello_message_serialized,
                         base_message_rx.size, NETCONN_NOCOPY);
     if (rc1 != ERR_OK) {
       ESP_LOGE(TAG, "netconn failed to send hello message");
@@ -1260,6 +1288,11 @@ static void http_get_task(void *pvParameters) {
 
     // state machine starts here
 
+    before_receive_callback_data_t before_receive_callback_data;
+    before_receive_callback_data.received_codec_header = &received_codec_header;
+    before_receive_callback_data.time_sync_data = &time_sync_data;
+    connection.before_receive_callback = (void (*)(void *))before_receive_callback;
+    connection.before_receive_callback_data = (void*) &before_receive_callback_data;
     connection.isMuted = &scSet.muted;
 
     connection.firstNetBuf = NULL;
@@ -1270,6 +1303,12 @@ static void http_get_task(void *pvParameters) {
 
     parser.get_byte_context = &connection;
     parser.get_byte_function = (get_byte_callback_t)(&connection_get_byte);
+
+
+    // as we need fast time syncs in the beginning we set receive timeout very low
+    time_sync_data.timeout = FAST_SYNC_LATENCY_BUF;
+    netconn_set_recvtimeout(lwipNetconn, time_sync_data.timeout / 1000); // timeout in ms
+
 
     // Main connection loop - state machine + data processing
     while (1) {
@@ -1332,6 +1371,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(nvs_flash_erase());
     ret = nvs_flash_init();
   }
+//  ESP_ERROR_CHECK(nvs_flash_erase());
   ESP_ERROR_CHECK(ret);
 
   esp_log_level_set("*", ESP_LOG_INFO);

@@ -17,7 +17,11 @@ typedef enum {
 
 typedef struct {
   esp_netif_t* netif;
+  // not really connection's concern, but needed.
   bool* isMuted;
+  void* before_receive_callback_data;
+  void (*before_receive_callback)(void* data);
+  // netbuf handling
   struct netbuf* firstNetBuf;
   // buffer
   char* start;
