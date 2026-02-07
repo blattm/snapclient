@@ -6,13 +6,7 @@
 #include "mdns.h"
 #include "net_functions.h"
 #include "network_interface.h"
-
-/* snapast parameters; configurable in menuconfig */
-#define SNAPCAST_SERVER_USE_MDNS CONFIG_SNAPSERVER_USE_MDNS
-#if !SNAPCAST_SERVER_USE_MDNS
-#define SNAPCAST_SERVER_HOST CONFIG_SNAPSERVER_HOST
-#define SNAPCAST_SERVER_PORT CONFIG_SNAPSERVER_PORT
-#endif
+#include "settings_manager.h"
 
 // External variable that need to be accessible
 extern struct netconn* lwipNetconn;
@@ -61,77 +55,119 @@ void setup_network(esp_netif_t** netif) {
       vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-#if SNAPCAST_SERVER_USE_MDNS
-    // Find snapcast server
-    // Connect to first snapcast server found
-    r = NULL;
-    err = 0;
-    while (!r || err) {
-      ESP_LOGI(TAG, "Lookup snapcast service on network");
-      esp_err_t err = mdns_query_ptr("_snapcast", "_tcp", 3000, 20, &r);
-      if (err) {
-        ESP_LOGE(TAG, "Query Failed");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-      }
-
-      if (!r) {
-        ESP_LOGW(TAG, "No results found!");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-      }
+    /* Decide at runtime whether to use mDNS or static server config.
+     * The settings_manager holds the mdns flag and optional server host/port.
+     */
+    ip_addr_t remote_ip;
+    bool use_mdns = true;
+    if (settings_get_mdns_enabled(&use_mdns) != ESP_OK) {
+      use_mdns = true;  // default to mdns if error
     }
 
-    ESP_LOGI(TAG, "\n~~~~~~~~~~ MDNS Query success ~~~~~~~~~~");
-    mdns_print_results(r);
-    ESP_LOGI(TAG, "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
-
-    ip_addr_t remote_ip;
-    mdns_result_t* re = r;
-    while (re) {
-      mdns_ip_addr_t* a = re->addr;
-#if CONFIG_SNAPCLIENT_CONNECT_IPV6
-      if (a->addr.type == IPADDR_TYPE_V6) {
-        *netif = re->esp_netif;
-        break;
-      }
-
-      // TODO: fall back to IPv4 if no IPv6 was available
-#else
-      if (a->addr.type == IPADDR_TYPE_V4) {
-        *netif = re->esp_netif;
-        break;
-      }
+#ifndef CONFIG_SNAPSERVER_USE_MDNS
+    if (use_mdns) {
+      ESP_LOGW(TAG,
+               "mDNS requested in settings but not compiled in; falling back "
+               "to static server settings");
+      use_mdns = false;
+    }
 #endif
 
-      re = re->next;
-    }
+    if (use_mdns) {
+#if CONFIG_SNAPSERVER_USE_MDNS
+      ESP_LOGI(TAG, "Enable mdns");
+      mdns_init();
+#endif
+      // Find snapcast server via mDNS
+      r = NULL;
+      err = 0;
+      while (!r || err) {
+        ESP_LOGI(TAG, "Lookup snapcast service on network");
+        esp_err_t err = mdns_query_ptr("_snapcast", "_tcp", 3000, 20, &r);
+        if (err) {
+          ESP_LOGE(TAG, "Query Failed");
+          vTaskDelay(pdMS_TO_TICKS(1000));
+        }
 
-    if (!re) {
+        if (!r) {
+          ESP_LOGW(TAG, "No results found!");
+          vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+      }
+
+      ESP_LOGI(TAG, "\n~~~~~~~~~~ MDNS Query success ~~~~~~~~~~");
+      mdns_print_results(r);
+      ESP_LOGI(TAG, "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+
+      mdns_result_t* re = r;
+      while (re) {
+        mdns_ip_addr_t* a = re->addr;
+#if CONFIG_SNAPCLIENT_CONNECT_IPV6
+        if (a->addr.type == IPADDR_TYPE_V6) {
+          *netif = re->esp_netif;
+          break;
+        }
+
+        // TODO: fall back to IPv4 if no IPv6 was available
+#else
+        if (a->addr.type == IPADDR_TYPE_V4) {
+          *netif = re->esp_netif;
+          break;
+        }
+#endif
+
+        re = re->next;
+      }
+
+      if (!re) {
+        mdns_query_results_free(r);
+
+        ESP_LOGW(TAG, "didn't find any valid IP in MDNS query");
+
+        continue;
+      }
+
+      ip_addr_copy(remote_ip, re->addr->addr);
+      remotePort = r->port;
+
       mdns_query_results_free(r);
 
-      ESP_LOGW(TAG, "didn't find any valid IP in MDNS query");
+      ESP_LOGI(TAG, "Found %s:%d", ipaddr_ntoa(&remote_ip), remotePort);
+    } else {
+      // Use static server configuration from settings_manager
+      char static_host[128] = {0};
+      int32_t static_port = 0;
+      if (settings_get_server_host(static_host, sizeof(static_host)) !=
+              ESP_OK ||
+          static_host[0] == '\0') {
+        ESP_LOGW(TAG, "Static server not configured in settings, skipping");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        continue;
+      }
 
-      continue;
+      if (settings_get_server_port(&static_port) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to read static server port from settings");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        continue;
+      }
+
+      if (static_port == 0) {
+        ESP_LOGW(TAG, "Static server port is 0/unset, skipping");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        continue;
+      }
+
+      if (ipaddr_aton(static_host, &remote_ip) == 0) {
+        ESP_LOGE(TAG, "can't convert static server address to numeric: %s",
+                 static_host);
+        continue;
+      }
+
+      remotePort = (uint16_t)static_port;
+
+      ESP_LOGI(TAG, "try connecting to static configuration %s:%d",
+               ipaddr_ntoa(&remote_ip), remotePort);
     }
-
-    ip_addr_copy(remote_ip, re->addr->addr);
-    remotePort = r->port;
-
-    mdns_query_results_free(r);
-
-    ESP_LOGI(TAG, "Found %s:%d", ipaddr_ntoa(&remote_ip), remotePort);
-#else
-    ip_addr_t remote_ip;
-
-    if (ipaddr_aton(SNAPCAST_SERVER_HOST, &remote_ip) == 0) {
-      ESP_LOGE(TAG, "can't convert static server adress to numeric");
-      continue;
-    }
-
-    remotePort = SNAPCAST_SERVER_PORT;
-
-    ESP_LOGI(TAG, "try connecting to static configuration %s:%d",
-             ipaddr_ntoa(&remote_ip), remotePort);
-#endif
 
     if (remote_ip.type == IPADDR_TYPE_V4) {
       lwipNetconn = netconn_new(NETCONN_TCP);

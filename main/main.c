@@ -1,33 +1,30 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "board.h"
 #include "driver/timer_types_legacy.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
+#include "esp_pm.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
-#include "esp_pm.h"
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/idf_additions.h"
 #include "freertos/portmacro.h"
 #include "freertos/projdefs.h"
 #include "freertos/task.h"
-
 #include "hal/gpio_types.h"
-#include "freertos/idf_additions.h"
-
-#include "board.h"
-#include "lwip/ip_addr.h"
-#include "lwip/netif.h"
-#include "esp_netif.h"
 #include "lwip/api.h"
 #include "lwip/dns.h"
 #include "lwip/err.h"
+#include "lwip/ip_addr.h"
 #include "lwip/netdb.h"
+#include "lwip/netif.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
 #include "mdns.h"
@@ -44,6 +41,7 @@
 #include "driver/i2s_std.h"
 #if CONFIG_USE_DSP_PROCESSOR
 #include "dsp_processor.h"
+#include "dsp_processor_settings.h"
 #endif
 
 // Opus decoder is implemented as a subcomponet from master git repo
@@ -51,12 +49,13 @@
 
 // flac decoder is implemented as a subcomponet from master git repo
 #include "FLAC/stream_decoder.h"
+#include "connection_handler.h"
 #include "ota_server.h"
 #include "player.h"
+#include "settings_manager.h"
 #include "snapcast.h"
 #include "snapcast_protocol_parser.h"
 #include "ui_http_server.h"
-#include "connection_handler.h"
 
 static bool isCachedChunk = false;
 static uint32_t cachedBlocks = 0;
@@ -92,7 +91,6 @@ TaskHandle_t t_http_get_task = NULL;
 #define NORMAL_SYNC_LATENCY_BUF 1000000  // in µs
 
 /* snapast parameters; configurable in menuconfig */
-#define SNAPCAST_CLIENT_NAME CONFIG_SNAPCLIENT_NAME
 #define SNAPCAST_USE_SOFT_VOL CONFIG_SNAPCLIENT_USE_SOFT_VOL
 
 /* Logging tag */
@@ -102,21 +100,6 @@ static const char *TAG = "SC";
 SemaphoreHandle_t timeSyncSemaphoreHandle = NULL;
 
 SemaphoreHandle_t idCounterSemaphoreHandle = NULL;
-
-#if CONFIG_USE_DSP_PROCESSOR
-#if CONFIG_SNAPCLIENT_DSP_FLOW_STEREO
-dspFlows_t dspFlow = dspfStereo;
-#endif
-#if CONFIG_SNAPCLIENT_DSP_FLOW_BASSBOOST
-dspFlows_t dspFlow = dspfBassBoost;
-#endif
-#if CONFIG_SNAPCLIENT_DSP_FLOW_BIAMP
-dspFlows_t dspFlow = dspfBiamp;
-#endif
-#if CONFIG_SNAPCLIENT_DSP_FLOW_BASS_TREBLE_EQ
-dspFlows_t dspFlow = dspfEQBassTreble;
-#endif
-#endif
 
 typedef struct audioDACdata_s {
   bool mute;
@@ -223,7 +206,6 @@ typedef struct {
   esp_timer_handle_t timeSyncMessageTimer;
 } time_sync_data_t;
 
-
 /**
  *
  */
@@ -232,9 +214,8 @@ void time_sync_msg_received(base_message_t *base_message_rx,
                             time_sync_data_t *time_sync_data,
                             bool received_codec_header) {
   int64_t tmpDiffToServer, trx, tdif, ttx, diff;
-  trx =
-      (int64_t)base_message_rx->received.sec * 1000000LL +
-      (int64_t)base_message_rx->received.usec;
+  trx = (int64_t)base_message_rx->received.sec * 1000000LL +
+        (int64_t)base_message_rx->received.usec;
   ttx = (int64_t)base_message_rx->sent.sec * 1000000LL +
         (int64_t)base_message_rx->sent.usec;
   tdif = trx - ttx;
@@ -420,16 +401,17 @@ static FLAC__StreamDecoderWriteStatus write_callback(
     return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
   }
 
-  uint8_t * pcmData;
+  uint8_t *pcmData;
   do {
-     pcmData = (uint8_t *)realloc(pcmChunk.outData, pcmChunk.bytes + bytes);
+    pcmData = (uint8_t *)realloc(pcmChunk.outData, pcmChunk.bytes + bytes);
     if (!pcmData) {
-      ESP_LOGW(TAG, "%s, failed to allocate PCM chunk payload, try again", __func__);
+      ESP_LOGW(TAG, "%s, failed to allocate PCM chunk payload, try again",
+               __func__);
       vTaskDelay(pdMS_TO_TICKS(5));
-      //return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
+      // return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
     }
-  } while(!pcmData);
-  
+  } while (!pcmData);
+
   pcmChunk.outData = pcmData;
 
   for (i = 0; i < frame->header.blocksize; i++) {
@@ -530,20 +512,17 @@ void audio_set_volume(int volume) {
   xSemaphoreGive(audioDACSemaphore);
 }
 
-
 /**
  *
  */
-int server_settings_msg_received(server_settings_message_t* server_settings_message, snapcastSetting_t* scSet){
+int server_settings_msg_received(
+    server_settings_message_t *server_settings_message,
+    snapcastSetting_t *scSet) {
   // log mute state, buffer, latency
-  ESP_LOGI(TAG, "Buffer length:  %ld",
-           server_settings_message->buffer_ms);
-  ESP_LOGI(TAG, "Latency:        %ld",
-           server_settings_message->latency);
-  ESP_LOGI(TAG, "Mute:           %d",
-           server_settings_message->muted);
-  ESP_LOGI(TAG, "Setting volume: %ld",
-           server_settings_message->volume);
+  ESP_LOGI(TAG, "Buffer length:  %ld", server_settings_message->buffer_ms);
+  ESP_LOGI(TAG, "Latency:        %ld", server_settings_message->latency);
+  ESP_LOGI(TAG, "Mute:           %d", server_settings_message->muted);
+  ESP_LOGI(TAG, "Setting volume: %ld", server_settings_message->volume);
 
   // Volume setting using ADF HAL
   // abstraction
@@ -552,8 +531,7 @@ int server_settings_msg_received(server_settings_message_t* server_settings_mess
     if (server_settings_message->muted) {
       dsp_processor_set_volome(0.0);
     } else {
-      dsp_processor_set_volome(
-          (double)server_settings_message->volume / 100);
+      dsp_processor_set_volome((double)server_settings_message->volume / 100);
     }
 #endif
     audio_set_mute(server_settings_message->muted);
@@ -562,8 +540,7 @@ int server_settings_msg_received(server_settings_message_t* server_settings_mess
   if (scSet->volume != server_settings_message->volume) {
 #if SNAPCAST_USE_SOFT_VOL
     if (!server_settings_message->muted) {
-      dsp_processor_set_volome(
-          (double)server_settings_message->volume / 100);
+      dsp_processor_set_volome((double)server_settings_message->volume / 100);
     }
 #else
     audio_set_volume(server_settings_message->volume);
@@ -580,7 +557,7 @@ int server_settings_msg_received(server_settings_message_t* server_settings_mess
              "Failed to notify sync task. "
              "Did you init player?");
 
-    return -1; // fatal, this triggers return from http_get_task
+    return -1;  // fatal, this triggers return from http_get_task
   }
   return 0;
 }
@@ -588,144 +565,129 @@ int server_settings_msg_received(server_settings_message_t* server_settings_mess
 /**
  *
  */
-int codec_header_received(
-  char *codecPayload,
-  uint32_t codecPayloadLen,
-  codec_type_t codec,
-  snapcastSetting_t* scSet,
-  time_sync_data_t* time_sync_data
-){
- // first ensure everything is set up
- // correctly and resources are
- // available
+int codec_header_received(char *codecPayload, uint32_t codecPayloadLen,
+                          codec_type_t codec, snapcastSetting_t *scSet,
+                          time_sync_data_t *time_sync_data) {
+  // first ensure everything is set up
+  // correctly and resources are
+  // available
 
- if (flacDecoder != NULL) {
-   FLAC__stream_decoder_finish(flacDecoder);
-   FLAC__stream_decoder_delete(flacDecoder);
-   flacDecoder = NULL;
- }
+  if (flacDecoder != NULL) {
+    FLAC__stream_decoder_finish(flacDecoder);
+    FLAC__stream_decoder_delete(flacDecoder);
+    flacDecoder = NULL;
+  }
 
- if (opusDecoder != NULL) {
-   opus_decoder_destroy(opusDecoder);
-   opusDecoder = NULL;
- }
+  if (opusDecoder != NULL) {
+    opus_decoder_destroy(opusDecoder);
+    opusDecoder = NULL;
+  }
 
- if (codec == OPUS) {
-   uint16_t channels;
-   uint32_t rate;
-   uint16_t bits;
+  if (codec == OPUS) {
+    uint16_t channels;
+    uint32_t rate;
+    uint16_t bits;
 
-   memcpy(&rate, codecPayload + 4, sizeof(rate));
-   memcpy(&bits, codecPayload + 8, sizeof(bits));
-   memcpy(&channels, codecPayload + 10,
-          sizeof(channels));
+    memcpy(&rate, codecPayload + 4, sizeof(rate));
+    memcpy(&bits, codecPayload + 8, sizeof(bits));
+    memcpy(&channels, codecPayload + 10, sizeof(channels));
 
-   scSet->codec = codec;
-   scSet->bits = bits;
-   scSet->ch = channels;
-   scSet->sr = rate;
+    scSet->codec = codec;
+    scSet->bits = bits;
+    scSet->ch = channels;
+    scSet->sr = rate;
 
-   ESP_LOGI(TAG, "Opus sample format: %ld:%d:%d\n", rate,
-            bits, channels);
+    ESP_LOGI(TAG, "Opus sample format: %ld:%d:%d\n", rate, bits, channels);
 
-   int error = 0;
+    int error = 0;
 
-   opusDecoder =
-       opus_decoder_create(scSet->sr, scSet->ch, &error);
-   if (error != 0) {
-     ESP_LOGI(TAG, "Failed to init opus coder");
-     return -1;
-   }
+    opusDecoder = opus_decoder_create(scSet->sr, scSet->ch, &error);
+    if (error != 0) {
+      ESP_LOGI(TAG, "Failed to init opus coder");
+      return -1;
+    }
 
-   ESP_LOGI(TAG, "Initialized opus Decoder: %d", error);
- } else if (codec == FLAC) {
-   decoderChunk.bytes = codecPayloadLen;
-   do {
-     decoderChunk.inData =
-         (uint8_t *)malloc(decoderChunk.bytes);
-     vTaskDelay(pdMS_TO_TICKS(1));
-   } while (decoderChunk.inData == NULL);
-   memcpy(decoderChunk.inData, codecPayload,
-          codecPayloadLen);
-   decoderChunk.outData = NULL;
-   decoderChunk.type = SNAPCAST_MESSAGE_CODEC_HEADER;
+    ESP_LOGI(TAG, "Initialized opus Decoder: %d", error);
+  } else if (codec == FLAC) {
+    decoderChunk.bytes = codecPayloadLen;
+    do {
+      decoderChunk.inData = (uint8_t *)malloc(decoderChunk.bytes);
+      vTaskDelay(pdMS_TO_TICKS(1));
+    } while (decoderChunk.inData == NULL);
+    memcpy(decoderChunk.inData, codecPayload, codecPayloadLen);
+    decoderChunk.outData = NULL;
+    decoderChunk.type = SNAPCAST_MESSAGE_CODEC_HEADER;
 
-   flacDecoder = FLAC__stream_decoder_new();
-   if (flacDecoder == NULL) {
-     ESP_LOGE(TAG, "Failed to init flac decoder");
-     return -1;
-   }
+    flacDecoder = FLAC__stream_decoder_new();
+    if (flacDecoder == NULL) {
+      ESP_LOGE(TAG, "Failed to init flac decoder");
+      return -1;
+    }
 
-   FLAC__StreamDecoderInitStatus init_status =
-       FLAC__stream_decoder_init_stream(
-           flacDecoder, read_callback, NULL, NULL, NULL,
-           NULL, write_callback, metadata_callback,
-           error_callback, scSet);
-   if (init_status !=
-       FLAC__STREAM_DECODER_INIT_STATUS_OK) {
-     ESP_LOGE(TAG, "ERROR: initializing decoder: %s\n",
-              FLAC__StreamDecoderInitStatusString
-                  [init_status]);
+    FLAC__StreamDecoderInitStatus init_status =
+        FLAC__stream_decoder_init_stream(
+            flacDecoder, read_callback, NULL, NULL, NULL, NULL, write_callback,
+            metadata_callback, error_callback, scSet);
+    if (init_status != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
+      ESP_LOGE(TAG, "ERROR: initializing decoder: %s\n",
+               FLAC__StreamDecoderInitStatusString[init_status]);
 
-     return -1;
-   }
+      return -1;
+    }
 
-   FLAC__stream_decoder_process_until_end_of_metadata(
-       flacDecoder);
+    FLAC__stream_decoder_process_until_end_of_metadata(flacDecoder);
 
-   // ESP_LOGI(TAG, "%s: processed codec header",
-   // __func__);
- } else if (codec == PCM) {
-   uint16_t channels;
-   uint32_t rate;
-   uint16_t bits;
+    // ESP_LOGI(TAG, "%s: processed codec header",
+    // __func__);
+  } else if (codec == PCM) {
+    uint16_t channels;
+    uint32_t rate;
+    uint16_t bits;
 
-   memcpy(&channels, codecPayload + 22,
-          sizeof(channels));
-   memcpy(&rate, codecPayload + 24, sizeof(rate));
-   memcpy(&bits, codecPayload + 34, sizeof(bits));
+    memcpy(&channels, codecPayload + 22, sizeof(channels));
+    memcpy(&rate, codecPayload + 24, sizeof(rate));
+    memcpy(&bits, codecPayload + 34, sizeof(bits));
 
-   scSet->codec = codec;
-   scSet->bits = bits;
-   scSet->ch = channels;
-   scSet->sr = rate;
+    scSet->codec = codec;
+    scSet->bits = bits;
+    scSet->ch = channels;
+    scSet->sr = rate;
 
-   ESP_LOGI(TAG, "pcm sampleformat: %ld:%d:%d", scSet->sr,
-            scSet->bits, scSet->ch);
- } else {
-   ESP_LOGE(TAG,
-            "codec header decoder "
-            "shouldn't get here after "
-            "codec string was detected");
+    ESP_LOGI(TAG, "pcm sampleformat: %ld:%d:%d", scSet->sr, scSet->bits,
+             scSet->ch);
+  } else {
+    ESP_LOGE(TAG,
+             "codec header decoder "
+             "shouldn't get here after "
+             "codec string was detected");
 
-   return -1;
- }
+    return -1;
+  }
 
- if (player_send_snapcast_setting(scSet) != pdPASS) {
-   ESP_LOGE(TAG,
-            "Failed to notify sync task. "
-            "Did you init player?");
+  if (player_send_snapcast_setting(scSet) != pdPASS) {
+    ESP_LOGE(TAG,
+             "Failed to notify sync task. "
+             "Did you init player?");
 
-   return -1;
- }
+    return -1;
+  }
 
- // ESP_LOGI(TAG, "done codec header msg");
+  // ESP_LOGI(TAG, "done codec header msg");
 
- esp_timer_stop(time_sync_data->timeSyncMessageTimer);
- if (!esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
-   esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
-                            time_sync_data->timeout);
- }
+  esp_timer_stop(time_sync_data->timeSyncMessageTimer);
+  if (!esp_timer_is_active(time_sync_data->timeSyncMessageTimer)) {
+    esp_timer_start_periodic(time_sync_data->timeSyncMessageTimer,
+                             time_sync_data->timeout);
+  }
   return 0;
 }
-
-
 
 /**
  *
  */
-int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
-                         pcm_chunk_message_t** pcmData, wire_chunk_message_t* wire_chnk) {
+int handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
+                         pcm_chunk_message_t **pcmData,
+                         wire_chunk_message_t *wire_chnk) {
   switch (codec) {
     case OPUS: {
       int frame_size = -1;
@@ -733,8 +695,7 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
       opus_int16 *audio = NULL;
 
       samples_per_frame =
-          opus_packet_get_samples_per_frame(
-              decoderChunk.inData, scSet->sr);
+          opus_packet_get_samples_per_frame(decoderChunk.inData, scSet->sr);
       if (samples_per_frame < 0) {
         ESP_LOGE(TAG,
                  "couldn't get samples per frame count "
@@ -757,11 +718,9 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
 
       size_t bytes;
       do {
-        bytes = samples_per_frame *
-                (scSet->ch * scSet->bits >> 3);
+        bytes = samples_per_frame * (scSet->ch * scSet->bits >> 3);
 
-        while ((audio = (opus_int16 *)realloc(
-                    audio, bytes)) == NULL) {
+        while ((audio = (opus_int16 *)realloc(audio, bytes)) == NULL) {
           ESP_LOGE(TAG,
                    "couldn't realloc memory for OPUS "
                    "audio %d",
@@ -770,10 +729,9 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
           vTaskDelay(pdMS_TO_TICKS(1));
         }
 
-        frame_size = opus_decode(
-            opusDecoder, decoderChunk.inData,
-            decoderChunk.bytes, (opus_int16 *)audio,
-            samples_per_frame, 0);
+        frame_size =
+            opus_decode(opusDecoder, decoderChunk.inData, decoderChunk.bytes,
+                        (opus_int16 *)audio, samples_per_frame, 0);
 
         samples_per_frame <<= 1;
       } while (frame_size < 0);
@@ -785,8 +743,7 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
 
       // ESP_LOGW(TAG, "OPUS decode: %d", frame_size);
 
-      if (allocate_pcm_chunk_memory(&new_pcmChunk,
-                                    bytes) < 0) {
+      if (allocate_pcm_chunk_memory(&new_pcmChunk, bytes) < 0) {
         *pcmData = NULL;
       } else {
         new_pcmChunk->timestamp = wire_chnk->timestamp;
@@ -797,12 +754,10 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
           uint32_t cnt = 0;
 
           for (int i = 0; i < bytes; i += 4) {
-            sample = (volatile uint32_t *)(&(
-                new_pcmChunk->fragment->payload[i]));
-            tmpData = (((uint32_t)audio[cnt] << 16) &
-                       0xFFFF0000) |
-                      (((uint32_t)audio[cnt + 1] << 0) &
-                       0x0000FFFF);
+            sample =
+                (volatile uint32_t *)(&(new_pcmChunk->fragment->payload[i]));
+            tmpData = (((uint32_t)audio[cnt] << 16) & 0xFFFF0000) |
+                      (((uint32_t)audio[cnt + 1] << 0) & 0x0000FFFF);
             *sample = (volatile uint32_t)tmpData;
 
             cnt += 2;
@@ -814,16 +769,14 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
 
 #if CONFIG_USE_DSP_PROCESSOR
         if (new_pcmChunk->fragment->payload) {
-          dsp_processor_worker((void *)new_pcmChunk,
-                               (void *)scSet);
+          dsp_processor_worker((void *)new_pcmChunk, (void *)scSet);
         }
 #endif
 
         insert_pcm_chunk(new_pcmChunk);
       }
 
-      if (player_send_snapcast_setting(scSet) !=
-          pdPASS) {
+      if (player_send_snapcast_setting(scSet) != pdPASS) {
         ESP_LOGE(TAG,
                  "Failed to notify "
                  "sync task about "
@@ -841,13 +794,11 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
       cachedBlocks = 0;
 
       while (decoderChunk.bytes > 0) {
-        if (FLAC__stream_decoder_process_single(
-                flacDecoder) == 0) {
-          ESP_LOGE(
-              TAG,
-              "%s: FLAC__stream_decoder_process_single "
-              "failed",
-              __func__);
+        if (FLAC__stream_decoder_process_single(flacDecoder) == 0) {
+          ESP_LOGE(TAG,
+                   "%s: FLAC__stream_decoder_process_single "
+                   "failed",
+                   __func__);
 
           // TODO: should insert some abort condition?
           vTaskDelay(pdMS_TO_TICKS(10));
@@ -856,28 +807,21 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
 
       // alternating chunk sizes need time stamp repair
       if ((cachedBlocks > 0) && (scSet->sr != 0)) {
-        uint64_t diffUs =
-            1000000ULL * cachedBlocks / scSet->sr;
+        uint64_t diffUs = 1000000ULL * cachedBlocks / scSet->sr;
 
         uint64_t timestamp =
-            1000000ULL * wire_chnk->timestamp.sec +
-            wire_chnk->timestamp.usec;
+            1000000ULL * wire_chnk->timestamp.sec + wire_chnk->timestamp.usec;
 
         timestamp = timestamp - diffUs;
 
-        wire_chnk->timestamp.sec =
-            timestamp / 1000000ULL;
-        wire_chnk->timestamp.usec =
-            timestamp % 1000000ULL;
+        wire_chnk->timestamp.sec = timestamp / 1000000ULL;
+        wire_chnk->timestamp.usec = timestamp % 1000000ULL;
       }
 
       pcm_chunk_message_t *new_pcmChunk;
-      int32_t ret = allocate_pcm_chunk_memory(
-          &new_pcmChunk, pcmChunk.bytes);
+      int32_t ret = allocate_pcm_chunk_memory(&new_pcmChunk, pcmChunk.bytes);
 
-      scSet->chkInFrames =
-          FLAC__stream_decoder_get_blocksize(
-              flacDecoder);
+      scSet->chkInFrames = FLAC__stream_decoder_get_blocksize(flacDecoder);
 
       // ESP_LOGE (TAG, "block size: %ld",
       // scSet->chkInFrames * scSet->bits / 8 * scSet->ch);
@@ -885,33 +829,27 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
       // new_pcmChunk->totalSize);
 
       if (ret == 0) {
-        pcm_chunk_fragment_t *fragment =
-            new_pcmChunk->fragment;
+        pcm_chunk_fragment_t *fragment = new_pcmChunk->fragment;
         uint32_t fragmentCnt = 0;
 
         if (fragment->payload != NULL) {
-          uint32_t frames =
-              pcmChunk.bytes /
-              (scSet->ch * (scSet->bits / 8));
+          uint32_t frames = pcmChunk.bytes / (scSet->ch * (scSet->bits / 8));
 
           for (int i = 0; i < frames; i++) {
             // TODO: for now fragmented payload is not
             // supported and the whole chunk is expected
             // to be in the first fragment
             uint32_t tmpData;
-            memcpy(&tmpData,
-                   &pcmChunk.outData[fragmentCnt],
+            memcpy(&tmpData, &pcmChunk.outData[fragmentCnt],
                    (scSet->ch * (scSet->bits / 8)));
 
             if (fragment != NULL) {
               volatile uint32_t *test =
-                  (volatile uint32_t *)(&(
-                      fragment->payload[fragmentCnt]));
+                  (volatile uint32_t *)(&(fragment->payload[fragmentCnt]));
               *test = (volatile uint32_t)tmpData;
             }
 
-            fragmentCnt +=
-                (scSet->ch * (scSet->bits / 8));
+            fragmentCnt += (scSet->ch * (scSet->bits / 8));
             if (fragmentCnt >= fragment->size) {
               fragmentCnt = 0;
 
@@ -924,8 +862,7 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
 
 #if CONFIG_USE_DSP_PROCESSOR
         if (new_pcmChunk->fragment->payload) {
-          dsp_processor_worker((void *)new_pcmChunk,
-                               (void *)scSet);
+          dsp_processor_worker((void *)new_pcmChunk, (void *)scSet);
         }
 
 #endif
@@ -937,8 +874,7 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
       pcmChunk.outData = NULL;
       pcmChunk.bytes = 0;
 
-      if (player_send_snapcast_setting(scSet) !=
-          pdPASS) {
+      if (player_send_snapcast_setting(scSet) != pdPASS) {
         ESP_LOGE(TAG,
                  "Failed to "
                  "notify "
@@ -965,15 +901,13 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
       }
 
       scSet->chkInFrames =
-          decodedSize /
-          ((size_t)scSet->ch * (size_t)(scSet->bits / 8));
+          decodedSize / ((size_t)scSet->ch * (size_t)(scSet->bits / 8));
 
       // ESP_LOGW(TAG,
       //          "got PCM decoded chunk size: %ld
       //          frames", scSet->chkInFrames);
 
-      if (player_send_snapcast_setting(scSet) !=
-          pdPASS) {
+      if (player_send_snapcast_setting(scSet) != pdPASS) {
         ESP_LOGE(TAG,
                  "Failed to notify "
                  "sync task about "
@@ -985,8 +919,7 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
 
 #if CONFIG_USE_DSP_PROCESSOR
       if ((*pcmData) && ((*pcmData)->fragment->payload)) {
-        dsp_processor_worker((void *)(*pcmData),
-                             (void *)scSet);
+        dsp_processor_worker((void *)(*pcmData), (void *)scSet);
       }
 #endif
       if (*pcmData) {
@@ -1019,30 +952,28 @@ int handle_chunk_message(codec_type_t codec, snapcastSetting_t* scSet,
  * -1 if a critial error occured
  * -2 if network needs restart
  */
-int process_data(
-    snapcast_protocol_parser_t* parser,
-    time_sync_data_t* time_sync_data,
-    bool* received_codec_header,
-    codec_type_t* codec,
-    snapcastSetting_t* scSet,
-    pcm_chunk_message_t** pcmData
-){
+int process_data(snapcast_protocol_parser_t *parser,
+                 time_sync_data_t *time_sync_data, bool *received_codec_header,
+                 codec_type_t *codec, snapcastSetting_t *scSet,
+                 pcm_chunk_message_t **pcmData) {
   base_message_t base_message_rx;
 
   if (parse_base_message(parser, &base_message_rx) == PARSER_COMPLETE) {
     time_sync_data->now = esp_timer_get_time();
     base_message_rx.received.sec = time_sync_data->now / 1000000;
-    base_message_rx.received.usec = time_sync_data->now - base_message_rx.received.sec * 1000000;
+    base_message_rx.received.usec =
+        time_sync_data->now - base_message_rx.received.sec * 1000000;
   } else {  // PARSER_CONNECTION_ERROR (only these two cases for base message)
     return -2;  // restart connection
   }
 
   switch (base_message_rx.type) {
     case SNAPCAST_MESSAGE_WIRE_CHUNK: {
-      wire_chunk_message_t wire_chnk = {{0, 0}, 0, NULL}; // is wire_chnk.payload ever used?
+      wire_chunk_message_t wire_chnk = {
+          {0, 0}, 0, NULL};  // is wire_chnk.payload ever used?
       switch (parse_wire_chunk_message(parser, &base_message_rx,
-                                       *received_codec_header, *codec,
-                                       pcmData, &wire_chnk, &decoderChunk)) {
+                                       *received_codec_header, *codec, pcmData,
+                                       &wire_chnk, &decoderChunk)) {
         case PARSER_COMPLETE: {
           if (handle_chunk_message(*codec, scSet, pcmData, &wire_chnk) != 0) {
             return -1;
@@ -1064,13 +995,14 @@ int process_data(
     }
 
     case SNAPCAST_MESSAGE_CODEC_HEADER: {
-      char* codecPayload = NULL;
+      char *codecPayload = NULL;
       uint32_t codecPayloadLen = 0;
       int return_value = 0;
-      switch (parse_codec_header_message(parser,  received_codec_header, codec,
+      switch (parse_codec_header_message(parser, received_codec_header, codec,
                                          &codecPayload, &codecPayloadLen)) {
         case PARSER_COMPLETE: {
-          if (codec_header_received(codecPayload, codecPayloadLen, *codec, scSet, time_sync_data) != 0) {
+          if (codec_header_received(codecPayload, codecPayloadLen, *codec,
+                                    scSet, time_sync_data) != 0) {
             return_value = -1;
           }
           break;
@@ -1089,9 +1021,9 @@ int process_data(
           break;
         }
       }
-      
+
       // in all cases: free Payload
-      if (codecPayload != NULL){
+      if (codecPayload != NULL) {
         free(codecPayload);
       }
 
@@ -1100,11 +1032,12 @@ int process_data(
 
     case SNAPCAST_MESSAGE_SERVER_SETTINGS: {
       server_settings_message_t server_settings_message;
-      parser_return_state_t result = parse_sever_settings_message(parser, &base_message_rx, &server_settings_message);
-      switch (result)
-      {
+      parser_return_state_t result = parse_sever_settings_message(
+          parser, &base_message_rx, &server_settings_message);
+      switch (result) {
         case PARSER_COMPLETE: {
-          if (server_settings_msg_received(&server_settings_message, scSet) != 0){
+          if (server_settings_msg_received(&server_settings_message, scSet) !=
+              0) {
             return -1;
           }
           break;
@@ -1126,17 +1059,20 @@ int process_data(
 
     case SNAPCAST_MESSAGE_TIME: {
       time_message_t time_message_rx;
-      parser_return_state_t result = parse_time_message(parser, &base_message_rx, &time_message_rx);
-      if (result == PARSER_COMPLETE){
-        time_sync_msg_received(&base_message_rx, &time_message_rx, time_sync_data, *received_codec_header);
+      parser_return_state_t result =
+          parse_time_message(parser, &base_message_rx, &time_message_rx);
+      if (result == PARSER_COMPLETE) {
+        time_sync_msg_received(&base_message_rx, &time_message_rx,
+                               time_sync_data, *received_codec_header);
       } else if (result == PARSER_CONNECTION_ERROR) {
         return -2;
-      } // could also be "incomplete", i.e. ignore content
+      }  // could also be "incomplete", i.e. ignore content
       break;
     }
 
     default: {
-      if (parse_unknown_message(parser, &base_message_rx) == PARSER_CONNECTION_ERROR){
+      if (parse_unknown_message(parser, &base_message_rx) ==
+          PARSER_CONNECTION_ERROR) {
         return -2;
       }
       break;
@@ -1146,7 +1082,6 @@ int process_data(
   return 0;
 }
 
-
 /**
  *
  */
@@ -1155,11 +1090,11 @@ static void http_get_task(void *pvParameters) {
   connection.firstNetBuf = NULL;
   connection.rc1 = ERR_OK;
   connection.netif = NULL;
-
-  int rc1; // for local scope (handshake), independent of connection.rc1
+  int rc1;  // for local scope (handshake), independent of connection.rc1
   base_message_t base_message_rx;
   hello_message_t hello_message;
   char *hello_message_serialized = NULL;
+  static char device_hostname[64] = {0};  // Buffer for hostname
   int result;
   time_sync_data_t time_sync_data;
   time_sync_data.lastTimeSync = 0;
@@ -1179,11 +1114,6 @@ static void http_get_task(void *pvParameters) {
 
     return;
   }
-
-#if CONFIG_SNAPCLIENT_USE_MDNS
-  ESP_LOGI(TAG, "Enable mdns");
-  mdns_init();
-#endif
 
   while (1) {
     // do some house keeping
@@ -1217,12 +1147,10 @@ static void http_get_task(void *pvParameters) {
         free(decoderChunk.outData);
         decoderChunk.outData = NULL;
       }
-
     }
 
     // NETWORK setup ends here ( or before getting mac address )
     setup_network(&connection.netif);
- 
 
     if (reset_latency_buffer() < 0) {
       ESP_LOGE(TAG,
@@ -1258,14 +1186,22 @@ static void http_get_task(void *pvParameters) {
 
     base_message_rx.refersTo = 0x0000;
     base_message_rx.sent.sec = time_sync_data.now / 1000000;
-    base_message_rx.sent.usec = time_sync_data.now - base_message_rx.sent.sec * 1000000;
+    base_message_rx.sent.usec =
+        time_sync_data.now - base_message_rx.sent.sec * 1000000;
     base_message_rx.received.sec = 0;
     base_message_rx.received.usec = 0;
     base_message_rx.size = 0x00000000;
 
     // init hello message
     hello_message.mac = mac_address;
-    hello_message.hostname = SNAPCAST_CLIENT_NAME;
+
+    // Get hostname from NVS or fallback to a sensible default
+    if (settings_get_hostname(device_hostname, sizeof(device_hostname)) !=
+        ESP_OK) {
+      strncpy(device_hostname, "snapclient", sizeof(device_hostname) - 1);
+    }
+    hello_message.hostname = device_hostname;
+
     hello_message.version = (char *)VERSION_STRING;
     hello_message.client_name = "libsnapcast";
     hello_message.os = "esp32";
@@ -1322,7 +1258,7 @@ static void http_get_task(void *pvParameters) {
 
     snapcast_protocol_parser_t parser;
 
-    // state machine starts here     
+    // state machine starts here
 
     connection.isMuted = &scSet.muted;
 
@@ -1332,14 +1268,15 @@ static void http_get_task(void *pvParameters) {
 
     connection.state = CONNECTION_INITIALIZED;
 
-
     parser.get_byte_context = &connection;
     parser.get_byte_function = (get_byte_callback_t)(&connection_get_byte);
 
     // Main connection loop - state machine + data processing
     while (1) {
-      int result = process_data(&parser, &time_sync_data, &received_codec_header, &codec, &scSet, &pcmData);
-      if (result == -1) { 
+      int result =
+          process_data(&parser, &time_sync_data, &received_codec_header, &codec,
+                       &scSet, &pcmData);
+      if (result == -1) {
         return;  // critical error in data processing
       } else if (result == -2) {
         break;  // restart connection
@@ -1348,12 +1285,11 @@ static void http_get_task(void *pvParameters) {
   }
 }
 
-
 /**
  *
  */
 static void dac_control_task(audio_board_handle_t board_handle,
-                                    QueueHandle_t audioQHdl) {
+                             QueueHandle_t audioQHdl) {
   audioDACdata_t dac_data;
   audioDACdata_t dac_data_old = {
       .mute = true,
@@ -1371,18 +1307,20 @@ static void dac_control_task(audio_board_handle_t board_handle,
         audio_hal_set_volume(board_handle->audio_hal, dac_data.volume);
       }
       if (dac_data.enabled != dac_data_old.enabled) {
-        if (dac_data.enabled) { 
-          audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
-        }
-        else {
-          audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_STOP);
+        if (dac_data.enabled) {
+          audio_hal_ctrl_codec(board_handle->audio_hal,
+                               AUDIO_HAL_CODEC_MODE_DECODE,
+                               AUDIO_HAL_CTRL_START);
+        } else {
+          audio_hal_ctrl_codec(board_handle->audio_hal,
+                               AUDIO_HAL_CODEC_MODE_DECODE,
+                               AUDIO_HAL_CTRL_STOP);
         }
       }
       dac_data_old = dac_data;
     }
   }
 }
-
 
 /**
  *
@@ -1406,6 +1344,11 @@ void app_main(void) {
   // esp_log_level_set("i2s_common", ESP_LOG_DEBUG);
   esp_log_level_set("wifi", ESP_LOG_WARN);
   esp_log_level_set("wifi_init", ESP_LOG_WARN);
+  esp_log_level_set("httpd_uri", ESP_LOG_WARN);
+  esp_log_level_set("settings", ESP_LOG_DEBUG);
+  esp_log_level_set("dsp_settings", ESP_LOG_DEBUG);
+  esp_log_level_set("UI_HTTP", ESP_LOG_WARN);
+  esp_log_level_set("dspProc", ESP_LOG_DEBUG);
 
 #if CONFIG_SNAPCLIENT_USE_INTERNAL_ETHERNET || \
     CONFIG_SNAPCLIENT_USE_SPI_ETHERNET
@@ -1578,19 +1521,30 @@ void app_main(void) {
   */
   network_if_init();
 
+  // Initialize settings manager (hostname + snapserver settings)
+  settings_manager_init();
+
+  // Get hostname for mDNS
+  char mdns_hostname[64] = {0};
+  if (settings_get_hostname(mdns_hostname, sizeof(mdns_hostname)) != ESP_OK) {
+    strncpy(mdns_hostname, "snapclient", sizeof(mdns_hostname) - 1);
+  }
+  ESP_LOGI(TAG, "Device hostname: %s", mdns_hostname);
+
   init_http_server_task();
 
   // Enable websocket server
   //  ESP_LOGI(TAG, "Setup ws server");
   //  websocket_if_start();
 
-  net_mdns_register("snapclient");
+  net_mdns_register(mdns_hostname);
 #ifdef CONFIG_SNAPCLIENT_SNTP_ENABLE
   set_time_from_sntp();
 #endif
 
 #if CONFIG_USE_DSP_PROCESSOR
   dsp_processor_init();
+  dsp_settings_init();
 #endif
 
   xTaskCreatePinnedToCore(&ota_server_task, "ota", 14 * 256, NULL,
@@ -1614,18 +1568,17 @@ void app_main(void) {
   //  }
 
 #if CONFIG_PM_ENABLE
-    //Configure dynamic frequency scaling:
-    //automatic light sleep is enabled if tickless idle support is enabled.
-    esp_pm_config_t pmConfig = {
-        .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, //Maximum CPU frequency
-        .min_freq_mhz = 40,  //Minimum CPU frequency
+  // Configure dynamic frequency scaling:
+  // automatic light sleep is enabled if tickless idle support is enabled.
+  esp_pm_config_t pmConfig = {
+      .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,  // Maximum CPU frequency
+      .min_freq_mhz = 40,                               // Minimum CPU frequency
 #if CONFIG_FREERTOS_USE_TICKLESS_IDLE
-        .light_sleep_enable = true
+      .light_sleep_enable = true
 #endif
-    };
-    esp_pm_configure(&pmConfig);
+  };
+  esp_pm_configure(&pmConfig);
 #endif
-  
-  dac_control_task(board_handle, audioQHdl);
 
+  dac_control_task(board_handle, audioQHdl);
 }
