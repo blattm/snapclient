@@ -7,6 +7,7 @@
 #include <sys/time.h>
 
 #include "driver/i2s_common.h"
+#include "esp_pm.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 #include "freertos/semphr.h"
@@ -21,6 +22,10 @@
 
 #if SOC_I2S_SUPPORTS_APLL
 #include "clk_ctrl_os.h"
+#endif
+
+#if CONFIG_PM_ENABLE
+#include "esp_pm.h"
 #endif
 
 #include <math.h>
@@ -40,6 +45,10 @@
 static const char *TAG = "PLAYER";
 
 #if USE_SAMPLE_INSERTION
+
+#if CONFIG_PM_ENABLE
+esp_pm_lock_handle_t player_pm_lock_handle = NULL;
+#endif
 
 #define INSERT_SAMPLES \
   1  //!< currently only allowed to be 1 or sync algorithm will break
@@ -413,6 +422,13 @@ int deinit_player(void) {
 
 
   tg0_timer_deinit();
+  
+#if CONFIG_PM_ENABLE
+  if (player_pm_lock_handle) {
+    esp_pm_lock_delete(player_pm_lock_handle);
+    player_pm_lock_handle = NULL;
+  }
+#endif
 
   ESP_LOGI(TAG, "deinit player done");
 
@@ -472,6 +488,10 @@ int init_player(i2s_std_gpio_config_t pin_config0_, i2s_port_t i2sNum_) {
   miniMedianFilter.numNodes = MINI_BUFFER_LEN;
   miniMedianFilter.medianBuffer = miniMedianBuffer;
   MEDIANFILTER_Init(&miniMedianFilter);
+  
+  #if CONFIG_PM_ENABLE
+  esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "player", &player_pm_lock_handle);
+  #endif
 
   ESP_LOGI(TAG, "init player done");
 
@@ -503,6 +523,8 @@ int start_player(snapcastSetting_t *setting) {
   while(reset_latency_buffer()<0) {
     vTaskDelay(pdMS_TO_TICKS(10));
   }
+  
+  esp_pm_lock_acquire(player_pm_lock_handle);
 #endif
   
   // create message queue to inform task of changed settings
@@ -1978,7 +2000,9 @@ static void player_task(void *pvParameters) {
   snapcastSettingQueueHandle = NULL;
   xSemaphoreGive(snapcastSettingsMux);
 
-
+#if CONFIG_PM_ENABLE
+  esp_pm_lock_release(player_pm_lock_handle);
+#endif
 
   ret = destroy_pcm_queue(&pcmChkQHdl);
 
