@@ -250,7 +250,11 @@ void time_sync_msg_received(base_message_t *base_message_rx,
     // }
   }
 
+#if USE_TIMEFILTER
   player_latency_insert(tmpDiffToServer, (tdif + ttx) / 2, trx);
+#else
+  player_latency_insert(tmpDiffToServer);
+#endif
 
   // ESP_LOGI(TAG, "Current latency:%lld:",
   // tmpDiffToServer);
@@ -412,8 +416,11 @@ static FLAC__StreamDecoderWriteStatus write_callback(
   do {
     pcmData = (uint8_t *)realloc(pcmChunk.outData, pcmChunk.bytes + bytes);
     if (!pcmData) {
-      ESP_LOGW(TAG, "%s, failed to allocate PCM chunk payload, try again",
-               __func__);
+      ESP_LOGW(TAG, "%s, failed to allocate PCM chunk payload (%lu + %u bytes, free heap %u, largest block %u), try again", __func__, 
+                                                                                                                            pcmChunk.bytes, 
+                                                                                                                            bytes, 
+                                                                                                                            heap_caps_get_free_size(MALLOC_CAP_8BIT), 
+                                                                                                                            heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
       vTaskDelay(pdMS_TO_TICKS(5));
       // return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
     }

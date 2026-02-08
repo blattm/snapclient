@@ -77,17 +77,24 @@ static SemaphoreHandle_t latencyBufFullSemaphoreHandle = NULL;
 
 static gptimer_handle_t gptimer = NULL;
 
+#if USE_TIMEFILTER
 static sTimeFilter_t latencyTimeFilter;
+
+static double latencyToServer = 0;
+static double latencyDrift = 0;
+static int64_t latencyLastUpdate = 0;
+#else
+static sMedianFilter_t latencyMedianFilter;
+static sMedianNode_t latencyMedianLong[LATENCY_MEDIAN_FILTER_LEN];
+
+static int64_t latencyToServer = 0;
+#endif
 
 static sMedianFilter_t shortMedianFilter;
 static sMedianNode_t shortMedianBuffer[SHORT_BUFFER_LEN];
 
 static sMedianFilter_t miniMedianFilter;
 static sMedianNode_t miniMedianBuffer[MINI_BUFFER_LEN];
-
-static double latencyToServer = 0;
-static double latencyDrift = 0;
-static int64_t latencyLastUpdate = 0;
 
 static int8_t currentDir = 0;  //!< current apll direction, see apll_adjust()
 
@@ -478,9 +485,16 @@ int init_player(i2s_std_gpio_config_t pin_config0_, i2s_port_t i2sNum_) {
   }
   xSemaphoreTake(latencyBufFullSemaphoreHandle, 0);
 
-  // init diff buff median filter
+  
+#if USE_TIMEFILTER
+  // init Kalmann time filter 
   TIMEFILTER_Init(&latencyTimeFilter, 0.01, 0.0, 1.001, 0.75, 100);
-
+#else
+  // init diff buff median filter
+  latencyMedianFilter.numNodes = LATENCY_MEDIAN_FILTER_LEN;
+  latencyMedianFilter.medianBuffer = latencyMedianLong;
+  reset_latency_buffer();
+#endif
   shortMedianFilter.numNodes = SHORT_BUFFER_LEN;
   shortMedianFilter.medianBuffer = shortMedianBuffer;
   MEDIANFILTER_Init(&shortMedianFilter);
@@ -590,6 +604,7 @@ int8_t player_get_snapcast_settings(snapcastSetting_t *setting) {
   return ret;
 }
 
+#if USE_TIMEFILTER
 /**
  *
  */
@@ -618,6 +633,34 @@ int32_t player_latency_insert(int64_t newValue, int64_t max_error, int64_t time_
 
   return 0;
 }
+#else
+/**
+ *
+ */
+int32_t player_latency_insert(int64_t newValue) {
+  int64_t medianValue;
+
+  medianValue = MEDIANFILTER_Insert(&latencyMedianFilter, newValue);
+  if (xSemaphoreTake(latencyBufSemaphoreHandle, pdMS_TO_TICKS(0)) == pdTRUE) {
+    if (MEDIANFILTER_isFull(&latencyMedianFilter, LATENCY_MEDIAN_FILTER_FULL)) {
+      xSemaphoreGive(latencyBufFullSemaphoreHandle);
+
+      //      ESP_LOGI(TAG, "(full) latency median: %lldus", medianValue);
+    }
+    //    else {
+    //      ESP_LOGI(TAG, "(not full) latency median: %lldus", medianValue);
+    //    }
+
+    latencyToServer = medianValue;
+
+    xSemaphoreGive(latencyBufSemaphoreHandle);
+  } else {
+    ESP_LOGW(TAG, "couldn't set latencyToServer = medianValue");
+  }
+
+  return 0;
+}
+#endif
 
 /**
  *
@@ -673,6 +716,7 @@ int32_t player_send_snapcast_setting(snapcastSetting_t *setting) {
   return pdPASS;
 }
 
+#if USE_TIMEFILTER
 /**
  *
  */
@@ -749,6 +793,77 @@ int32_t get_diff_to_server(int64_t *tDiff, int64_t now) {
 
   return 0;
 }
+
+#else
+
+/**
+ *
+ */
+int32_t reset_latency_buffer(void) {
+  xSemaphoreTake(latencyBufFullSemaphoreHandle, pdMS_TO_TICKS(10));
+  
+  // init diff buff median filter
+  if (MEDIANFILTER_Init(&latencyMedianFilter) < 0) {
+    ESP_LOGE(TAG, "reset_diff_buffer: couldn't init median filter long. STOP");
+
+    return -2;
+  }
+
+  if (latencyBufSemaphoreHandle == NULL) {
+    ESP_LOGE(TAG, "reset_diff_buffer: latencyBufSemaphoreHandle == NULL");
+
+    return -2;
+  } 
+
+  if (xSemaphoreTake(latencyBufSemaphoreHandle, portMAX_DELAY) == pdTRUE) {
+    latencyToServer = 0;
+
+    xSemaphoreGive(latencyBufSemaphoreHandle);
+  } else {
+    ESP_LOGW(TAG, "reset_diff_buffer: can't take semaphore");
+
+    return -1;
+  }
+
+  return 0;
+}
+
+/**
+ *
+ */
+int32_t latency_buffer_full(bool *is_full) {
+  *is_full = MEDIANFILTER_isFull(&latencyMedianFilter, LATENCY_MEDIAN_FILTER_FULL);
+  
+  return 0;
+}
+
+int32_t get_diff_to_server(int64_t *tDiff, int64_t now) {
+  static int64_t lastDiff = 0;
+
+  if (latencyBufSemaphoreHandle == NULL) {
+    ESP_LOGE(TAG, "get_diff_to_server: latencyBufSemaphoreHandle == NULL");
+
+    return -2;
+  }
+
+  if (xSemaphoreTake(latencyBufSemaphoreHandle, 0) == pdFALSE) {
+    *tDiff = lastDiff;
+
+    // ESP_LOGW(TAG,
+    //          "get_diff_to_server: can't take semaphore. Old diff retrieved");
+
+    return -1;
+  }
+
+  *tDiff = latencyToServer;
+  lastDiff = latencyToServer;  // store value, so we can return a value if
+                               // semaphore couldn't be taken
+
+  xSemaphoreGive(latencyBufSemaphoreHandle);
+
+  return 0;
+}
+#endif
 
 /**
  *
@@ -1247,7 +1362,9 @@ int32_t insert_pcm_chunk(pcm_chunk_message_t *pcmChunk) {
     return -2;
   }
 
-  if (TIMEFILTER_isFull(&latencyTimeFilter, LATENCY_TIME_FILTER_FULL) == false) {
+  bool isFull = false;
+  latency_buffer_full(&isFull);
+  if (isFull == false) {
     free_pcm_chunk(pcmChunk);
 
     //    ESP_LOGW(TAG, "%s: wait for initial latency measurement to finish",
@@ -1255,7 +1372,6 @@ int32_t insert_pcm_chunk(pcm_chunk_message_t *pcmChunk) {
 
     return -3;
   }
-
   //  if (uxQueueSpacesAvailable(pcmChkQHdl) == 0) {
   //    pcm_chunk_message_t *element;
   //
