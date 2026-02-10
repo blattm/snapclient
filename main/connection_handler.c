@@ -100,6 +100,11 @@ void setup_network(esp_netif_t** netif) {
       mdns_result_t* re = r;
       while (re) {
         mdns_ip_addr_t* a = re->addr;
+        if (a == NULL) {
+          // No address in this result, skip to next
+          re = re->next;
+          continue;
+        }
 #if CONFIG_SNAPCLIENT_CONNECT_IPV6
         if (a->addr.type == IPADDR_TYPE_V6) {
           *netif = re->esp_netif;
@@ -117,7 +122,7 @@ void setup_network(esp_netif_t** netif) {
         re = re->next;
       }
 
-      if (!re) {
+      if (!re || !re->addr) {
         mdns_query_results_free(r);
 
         ESP_LOGW(TAG, "didn't find any valid IP in MDNS query");

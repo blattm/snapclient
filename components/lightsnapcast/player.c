@@ -231,7 +231,7 @@ static esp_err_t player_setup_i2s(snapcastSetting_t *setting) {
   }
 
 #if USE_SAMPLE_INSERTION
-  i2sDmaBufCnt = 3;
+  i2sDmaBufCnt = 2;
   // OPUS has a minimum frame size of 120
   // with DMA buffer set to this value sync algorithm
   // works for all decoders. We set it to 100 so
@@ -550,12 +550,18 @@ int start_player(snapcastSetting_t *setting) {
     memset(&scSet, 0, sizeof(snapcastSetting_t));
     player_get_snapcast_settings(&scSet);
     
-    int entries = ceil(((float)scSet.sr / (float)scSet.chkInFrames) *
+    // ensure we don't have a divide by zero situation
+    uint32_t chkInFrames = scSet.chkInFrames;
+    if (chkInFrames == 0) {
+      chkInFrames = 1152; // choose a good default for now
+    }
+    
+    int entries = ceil(((float)scSet.sr / (float)chkInFrames) *
                         ((float)scSet.buf_ms / 1000));
 
     // some chunks are placed in DMA buffer
     // so we can save a little RAM here
-    entries -= (i2sDmaBufMaxLen * i2sDmaBufCnt) / scSet.chkInFrames;
+    entries -= ((i2sDmaBufMaxLen * i2sDmaBufCnt) / chkInFrames);
 
     pcmChkQHdl = xQueueCreate(entries, sizeof(pcm_chunk_message_t *));
 
@@ -1643,6 +1649,11 @@ static void player_task(void *pvParameters) {
               // chnk->fragment->size);
             }
 
+            // If we still don't have a chunk, wait and retry
+            if (chnk == NULL) {
+              continue;
+            }
+
             fragment = chnk->fragment;
             p_payload = fragment->payload;
             size = fragment->size;
@@ -1964,7 +1975,7 @@ static void player_task(void *pvParameters) {
             #endif
             
             // expected play out based on timestamp
-            int64_t target_play_local_us = chunkStart - diff2Server + buf_us - outputBufferDacTime_us;
+            int64_t target_play_local_us = chunkStart - diff2Server + buf_us - outputBufferDacTime_us - clientDacLatency_us;
             // Ideal playout time based on local audio clock                    
             int64_t actual_play_local_us = playback_start_time_us + (int64_t)((samples_played * 1000000ll) / (int64_t)scSet.sr);
             int64_t error_us = actual_play_local_us - target_play_local_us;

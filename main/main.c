@@ -57,6 +57,9 @@
 #include "snapcast.h"
 #include "snapcast_protocol_parser.h"
 #include "ui_http_server.h"
+#if CONFIG_DAC_TAS5805M
+#include "tas5805m_settings.h"
+#endif
 
 static bool isCachedChunk = false;
 static uint32_t cachedBlocks = 0;
@@ -424,8 +427,21 @@ static FLAC__StreamDecoderWriteStatus write_callback(
       vTaskDelay(pdMS_TO_TICKS(5));
       // return FLAC__STREAM_DECODER_WRITE_STATUS_ABORT;
     }
-  } while (!pcmData);
-
+#if 0     // enable heap usage profiling
+    else {
+      static size_t largestFreeBlockMin = 10000000;
+      size_t largestFreeBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+      static size_t freeSizeMin = 10000000;
+      if (largestFreeBlock < largestFreeBlockMin) {
+        largestFreeBlockMin = largestFreeBlock;
+        ESP_LOGI(TAG, "%s, free heap %u, largest block %u", __func__,
+                                                            heap_caps_get_free_size(MALLOC_CAP_8BIT), 
+                                                            largestFreeBlockMin);
+      }
+    }
+#endif
+  } while(!pcmData);
+  
   pcmChunk.outData = pcmData;
 
   for (i = 0; i < frame->header.blocksize; i++) {
@@ -1531,6 +1547,13 @@ void app_main(void) {
   init_snapcast(audioQHdl);
   init_player(i2s_pin_config0, I2S_NUM_0);
 
+  #if CONFIG_DAC_TAS5805M
+  // Apply persisted TAS5805M settings now that the codec has been initialized
+  if (tas5805m_settings_init() != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to init persisted TAS5805M settings");
+  }
+  #endif
+
   network_if_init();
 
   // Initialize settings manager (hostname + snapserver settings)
@@ -1555,8 +1578,8 @@ void app_main(void) {
 #endif
 
 #if CONFIG_USE_DSP_PROCESSOR
-  dsp_processor_init();
-  dsp_settings_init();
+  dsp_processor_init();  // Must init processor first (creates mutexes/semaphores)
+  dsp_settings_init();   // Then settings can restore params into the processor
 #endif
 
   xTaskCreatePinnedToCore(&ota_server_task, "ota", 14 * 256, NULL,
