@@ -1157,7 +1157,7 @@ static void http_get_task(void *pvParameters) {
   if (idCounterSemaphoreHandle == NULL) {
     ESP_LOGE(TAG, "can't create id Counter Semaphore");
 
-    return;
+    esp_restart();
   }
 
   while (1) {
