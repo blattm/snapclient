@@ -992,7 +992,7 @@ void handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
 /*
  * returns:
  * 0 if a message was (partially) processed sucessfully
- * -2 if network needs restart
+ * -1 if network needs restart
  */
 int process_data(snapcast_protocol_parser_t *parser,
                  time_sync_data_t *time_sync_data, bool *received_codec_header,
@@ -1006,7 +1006,7 @@ int process_data(snapcast_protocol_parser_t *parser,
     base_message_rx.received.usec =
         time_sync_data->now - base_message_rx.received.sec * 1000000;
   } else {  // PARSER_CONNECTION_ERROR (only these two cases for base message)
-    return -2;  // restart connection
+    return -1;  // restart connection
   }
 
   switch (base_message_rx.type) {
@@ -1025,7 +1025,7 @@ int process_data(snapcast_protocol_parser_t *parser,
           return 0;
         }
         case PARSER_CONNECTION_ERROR: {
-          return -2;
+          return -1;
         }
       }
       break;
@@ -1043,7 +1043,7 @@ int process_data(snapcast_protocol_parser_t *parser,
           break;
         }
         case PARSER_CONNECTION_ERROR: {
-          return_value = -2;
+          return_value = -1;
           break;
         }
         case PARSER_INCOMPLETE: {
@@ -1071,7 +1071,7 @@ int process_data(snapcast_protocol_parser_t *parser,
           break;
         }
         case PARSER_CONNECTION_ERROR: {
-          return -2;
+          return -1;
         }
         case PARSER_INCOMPLETE: {
           // should not happen
@@ -1090,7 +1090,7 @@ int process_data(snapcast_protocol_parser_t *parser,
         time_sync_msg_received(&base_message_rx, &time_message_rx,
                                time_sync_data, *received_codec_header);
       } else if (result == PARSER_CONNECTION_ERROR) {
-        return -2;
+        return -1;
       }  // could also be "incomplete", i.e. ignore content
       break;
     }
@@ -1098,7 +1098,7 @@ int process_data(snapcast_protocol_parser_t *parser,
     default: {
       if (parse_unknown_message(parser, &base_message_rx) ==
           PARSER_CONNECTION_ERROR) {
-        return -2;
+        return -1;
       }
       break;
     }
@@ -1327,7 +1327,7 @@ static void http_get_task(void *pvParameters) {
       int result =
           process_data(&parser, &time_sync_data, &received_codec_header, &codec,
                        &scSet, &pcmData);
-      if (result == -2) {
+      if (result != 0) {
         break;  // restart connection
       }
     }
