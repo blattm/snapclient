@@ -24,7 +24,6 @@ typedef struct {
 typedef enum {
   PARSER_COMPLETE = 0,
   PARSER_INCOMPLETE,
-  PARSER_CRITICAL_ERROR,
   PARSER_CONNECTION_ERROR,
 } parser_return_state_t;
 

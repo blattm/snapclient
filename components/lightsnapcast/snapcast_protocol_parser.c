@@ -173,7 +173,8 @@ parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parse
       }
       default: {
         ESP_LOGE(TAG, "Decoder (1) not supported");
-        return PARSER_CRITICAL_ERROR;
+        // critical error
+        esp_restart();
       }
     }
   }
@@ -205,7 +206,8 @@ parser_return_state_t parse_codec_header_message(
              "opus, flac or pcm in "
              "/etc/snapserver.conf on "
              "server");
-    return PARSER_CRITICAL_ERROR;
+    // critical error
+    esp_restart();
   }
   READ_DATA(parser, codecString, codecStringLen);
 
@@ -230,7 +232,8 @@ parser_return_state_t parse_codec_header_message(
              "/etc/snapserver.conf on "
              "server");
 
-    return PARSER_CRITICAL_ERROR;
+    // critical error
+    esp_restart();
   }
 
   //
@@ -243,7 +246,8 @@ parser_return_state_t parse_codec_header_message(
              "couldn't get memory "
              "for codec payload");
 
-    return PARSER_CRITICAL_ERROR;
+    // critical error
+    esp_restart();
   }
 
   READ_DATA(parser, *codecPayload, *codecPayloadLen);
@@ -268,7 +272,8 @@ parser_return_state_t parse_sever_settings_message(
     ESP_LOGE(TAG,
              "couldn't get memory for "
              "server settings string");
-    return PARSER_CRITICAL_ERROR;
+    // critical error
+    esp_restart();
   }
 
   size_t tmpSize = base_message_rx->size - 4;
@@ -295,7 +300,8 @@ parser_return_state_t parse_sever_settings_message(
              "Failed to read server "
              "settings: %d",
              deserialization_result);
-    return PARSER_CRITICAL_ERROR;
+    // critical error
+    esp_restart();
   }
 
   return PARSER_COMPLETE;  // do callback
