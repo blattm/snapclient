@@ -172,7 +172,10 @@ parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parse
         break;
       }
       default: {
-        ESP_LOGE(TAG, "Decoder (1) not supported");
+        ESP_LOGE(TAG, "Decoder (1) not supported. This should never happen!");
+        // The case NONE should never happen, because we only set received_codec_header to true,
+        // if we got a supported codec header message (cf. parse_codec_header_message).
+        // So if we get here, something went very wrong.
         // critical error
         esp_restart();
       }
@@ -206,8 +209,8 @@ parser_return_state_t parse_codec_header_message(
              "opus, flac or pcm in "
              "/etc/snapserver.conf on "
              "server");
-    // critical error
-    esp_restart();
+    // restart connection
+    return PARSER_CONNECTION_ERROR;
   }
   READ_DATA(parser, codecString, codecStringLen);
 
@@ -232,8 +235,8 @@ parser_return_state_t parse_codec_header_message(
              "/etc/snapserver.conf on "
              "server");
 
-    // critical error
-    esp_restart();
+    // restart connection
+    return PARSER_CONNECTION_ERROR;
   }
 
   //
@@ -300,7 +303,7 @@ parser_return_state_t parse_sever_settings_message(
              "Failed to read server "
              "settings: %d",
              deserialization_result);
-    // critical error
+    // critical error. A failed deserialization could potentially be a memory issue.
     esp_restart();
   }
 

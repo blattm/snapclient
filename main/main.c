@@ -977,10 +977,9 @@ void handle_chunk_message(codec_type_t codec, snapcastSetting_t *scSet,
     }
 
     default: {
-      ESP_LOGE(TAG,
-               "Decoder (2) not "
-               "supported");
-
+      // This should not happen, because codec header message should have been
+      // parsed before and codec should have been set to a supported value.
+      ESP_LOGE(TAG, "Decoder (2) not supported. This should never happen!");
       // critical error
       esp_restart();
 
@@ -1260,7 +1259,8 @@ static void http_get_task(void *pvParameters) {
           &hello_message, (size_t *)&(base_message_rx.size));
       if (!hello_message_serialized) {
         ESP_LOGE(TAG, "Failed to serialize hello message");
-        return;
+        // critical error
+        esp_restart();
       }
     }
 
@@ -1268,7 +1268,8 @@ static void http_get_task(void *pvParameters) {
                                     BASE_MESSAGE_SIZE);
     if (result) {
       ESP_LOGE(TAG, "Failed to serialize base message");
-      return;
+      // critical error
+      esp_restart();
     }
 
     rc1 = netconn_write(lwipNetconn, base_message_serialized, BASE_MESSAGE_SIZE,
