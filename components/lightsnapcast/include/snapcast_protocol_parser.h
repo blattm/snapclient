@@ -32,7 +32,6 @@ parser_return_state_t parse_base_message(snapcast_protocol_parser_t* parser,
 
 parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parser,
                                                base_message_t* base_message_rx,
-                                               bool received_codec_header,
                                                codec_type_t codec,
                                                pcm_chunk_message_t** pcmData,
                                                wire_chunk_message_t* wire_chnk,

@@ -1022,8 +1022,7 @@ int process_data(snapcast_protocol_parser_t *parser,
       }
 
       switch (parse_wire_chunk_message(parser, &base_message_rx,
-                                       *received_codec_header, *codec, pcmData,
-                                       &wire_chnk, &decoderChunk)) {
+                                       *codec, pcmData, &wire_chnk, &decoderChunk)) {
         case PARSER_COMPLETE: {
           handle_chunk_message(*codec, scSet, pcmData, &wire_chnk);
           break;
