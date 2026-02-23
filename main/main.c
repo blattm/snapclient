@@ -1010,8 +1010,17 @@ int process_data(snapcast_protocol_parser_t *parser,
 
   switch (base_message_rx.type) {
     case SNAPCAST_MESSAGE_WIRE_CHUNK: {
-      wire_chunk_message_t wire_chnk = {
-          {0, 0}, 0, NULL};  // is wire_chnk.payload ever used?
+      wire_chunk_message_t wire_chnk = {{0, 0}, 0, NULL};  // is wire_chnk.payload ever used?
+
+      // skip this wires chunk message if codec header message was not received yet!
+      if (*received_codec_header == false) {
+        if (parser_skip_typed_message(parser, &base_message_rx) ==
+            PARSER_CONNECTION_ERROR) {
+          return -1;
+        }
+        break;
+      }
+
       switch (parse_wire_chunk_message(parser, &base_message_rx,
                                        *received_codec_header, *codec, pcmData,
                                        &wire_chnk, &decoderChunk)) {
@@ -1095,7 +1104,7 @@ int process_data(snapcast_protocol_parser_t *parser,
     }
 
     default: {
-      if (parse_unknown_message(parser, &base_message_rx) ==
+      if (parser_skip_typed_message(parser, &base_message_rx) ==
           PARSER_CONNECTION_ERROR) {
         return -1;
       }

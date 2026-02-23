@@ -51,7 +51,7 @@ parser_return_state_t parse_time_message(snapcast_protocol_parser_t* parser,
                                          base_message_t* base_message_rx,
                                          time_message_t* time_message_rx);
 
-parser_return_state_t parse_unknown_message(snapcast_protocol_parser_t* parser,
-                                            base_message_t* base_message_rx);
+parser_return_state_t parser_skip_typed_message(snapcast_protocol_parser_t* parser,
+                                                base_message_t* base_message_rx);
 
 #endif  // __SNAPCAST_PROTOCOL_PARSER_H__
