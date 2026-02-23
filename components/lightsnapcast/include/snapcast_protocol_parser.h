@@ -22,9 +22,8 @@ typedef struct {
 } snapcast_protocol_parser_t;
 
 typedef enum {
-  PARSER_COMPLETE = 0,
-  PARSER_INCOMPLETE,
-  PARSER_CONNECTION_ERROR,
+  PARSER_OK = 0,
+  PARSER_RESTART_CONNECTION,
 } parser_return_state_t;
 
 parser_return_state_t parse_base_message(snapcast_protocol_parser_t* parser,

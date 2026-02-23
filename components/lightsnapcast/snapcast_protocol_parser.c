@@ -7,7 +7,7 @@
   do { \
     char _byte; \
     if ((parser)->get_byte_function((parser)->get_byte_context, &_byte) != 0) { \
-      return PARSER_CONNECTION_ERROR; \
+      return PARSER_RESTART_CONNECTION; \
     } \
     (dest) = _byte; \
   } while(0)
@@ -17,7 +17,7 @@
     char _bytes[2]; \
     if ((parser)->get_byte_function((parser)->get_byte_context, &_bytes[0]) != 0 || \
         (parser)->get_byte_function((parser)->get_byte_context, &_bytes[1]) != 0) { \
-      return PARSER_CONNECTION_ERROR; \
+      return PARSER_RESTART_CONNECTION; \
     } \
     (dest) = (_bytes[0] & 0xFF) | ((_bytes[1] & 0xFF) << 8); \
   } while(0)
@@ -27,7 +27,7 @@
     char _bytes[4]; \
     for (int _i = 0; _i < 4; _i++) { \
       if ((parser)->get_byte_function((parser)->get_byte_context, &_bytes[_i]) != 0) { \
-        return PARSER_CONNECTION_ERROR; \
+        return PARSER_RESTART_CONNECTION; \
       } \
     } \
     (dest) = (_bytes[0] & 0xFF) | ((_bytes[1] & 0xFF) << 8) | \
@@ -44,7 +44,7 @@
   do { \
     for (uint32_t _i = 0; _i < (len); _i++) { \
       if ((parser)->get_byte_function((parser)->get_byte_context, &(dest)[_i]) != 0) { \
-        return PARSER_CONNECTION_ERROR; \
+        return PARSER_RESTART_CONNECTION; \
       } \
     } \
   } while(0)
@@ -54,7 +54,7 @@
     for (uint32_t _i = 0; _i < (len); _i++) { \
       if ((parser)->get_byte_function((parser)->get_byte_context, &(dest)[_i]) != 0) { \
         cleanup; \
-        return PARSER_CONNECTION_ERROR; \
+        return PARSER_RESTART_CONNECTION; \
       } \
     } \
   } while(0)
@@ -70,7 +70,7 @@ parser_return_state_t parse_base_message(snapcast_protocol_parser_t* parser,
   READ_TIMESTAMP(parser, base_message_rx->received);
   READ_UINT32_LE(parser, base_message_rx->size);
 
-  return PARSER_COMPLETE;
+  return PARSER_OK;
 }
 
 
@@ -180,7 +180,7 @@ parser_return_state_t parse_wire_chunk_message(snapcast_protocol_parser_t* parse
     }
   }
 
-  return PARSER_COMPLETE;
+  return PARSER_OK;
 }
 
 parser_return_state_t parse_codec_header_message(
@@ -204,7 +204,7 @@ parser_return_state_t parse_codec_header_message(
              "/etc/snapserver.conf on "
              "server");
     // restart connection
-    return PARSER_CONNECTION_ERROR;
+    return PARSER_RESTART_CONNECTION;
   }
   READ_DATA(parser, codecString, codecStringLen);
 
@@ -230,7 +230,7 @@ parser_return_state_t parse_codec_header_message(
              "server");
 
     // restart connection
-    return PARSER_CONNECTION_ERROR;
+    return PARSER_RESTART_CONNECTION;
   }
 
   //
@@ -251,7 +251,7 @@ parser_return_state_t parse_codec_header_message(
 
   *received_codec_header = true;
 
-  return PARSER_COMPLETE;
+  return PARSER_OK;
 }
 
 parser_return_state_t parse_sever_settings_message(
@@ -301,7 +301,7 @@ parser_return_state_t parse_sever_settings_message(
     esp_restart();
   }
 
-  return PARSER_COMPLETE;  // do callback
+  return PARSER_OK;  // do callback
 
 }
 
@@ -315,11 +315,11 @@ parser_return_state_t parse_time_message(snapcast_protocol_parser_t* parser,
     ESP_LOGE(TAG,
              "error time message, this shouldn't happen! %d %ld",
              8, base_message_rx->size);
-    return PARSER_INCOMPLETE;  // use this return value as "ignore"
+    return PARSER_RESTART_CONNECTION;
   }
 
   // ESP_LOGI(TAG, "done time message");
-  return PARSER_COMPLETE;  // do callback
+  return PARSER_OK;  // do callback
 }
 
 parser_return_state_t parser_skip_typed_message(snapcast_protocol_parser_t* parser,
@@ -332,5 +332,5 @@ parser_return_state_t parser_skip_typed_message(snapcast_protocol_parser_t* pars
 
   ESP_LOGI(TAG, "done skipping typed message %d", base_message_rx->type);
 
-  return PARSER_COMPLETE;
+  return PARSER_OK;
 }
