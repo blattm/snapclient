@@ -1,6 +1,8 @@
 #include "snapcast_protocol_parser.h"
 
 #include "esp_log.h"
+#include "freertos/task.h" // for vTaskDelay
+#include <string.h>
 
 // MACROS for reading from connection
 #define READ_BYTE(parser, dest) \
@@ -197,7 +199,7 @@ parser_return_state_t parse_codec_header_message(
   if (codecStringLen + 1 > sizeof(codecString)) {
     READ_DATA(parser, codecString, sizeof(codecString)-1);
     codecString[sizeof(codecString)-1] = 0; // null terminate
-    ESP_LOGE(TAG, "Codec : %s... not supported %lu", codecStringLen);
+    ESP_LOGE(TAG, "Codec : %s... not supported", codecString);
     ESP_LOGI(TAG,
              "Change encoder codec to "
              "opus, flac or pcm in "
